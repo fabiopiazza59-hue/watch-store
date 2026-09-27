@@ -22,7 +22,7 @@ const PREVIEW_ID = "preview";
 /**
  * The demo's stand-in for an order: the build sheet for the design in the link, worked out in the
  * browser exactly as an order would get it. The demo is public, so it shows the customer's price
- * and leaves out the workshop's costs.
+ * and leaves out the workshop's costs and suppliers.
  */
 export function BuildSheetPreview() {
   const shared = useSearchParams().get(SHARE_PARAM);
@@ -102,7 +102,7 @@ export function BuildSheetPreview() {
           sheet={sheet}
           orderId={PREVIEW_ID}
           spareStrapId={specExtras(spec).spareStrapId}
-          showCosts={false}
+          audience="public"
         />
       </div>
     </div>

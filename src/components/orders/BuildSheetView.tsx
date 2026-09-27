@@ -34,12 +34,16 @@ interface BuildSheetViewProps {
   orderId: string;
   /** The order's spare strap, so its line reads "Spare strap" rather than "Extra". */
   spareStrapId?: string | null;
-  /** Unit costs and the materials total; off where the public can see the sheet (the static demo). */
-  showCosts?: boolean;
+  /**
+   * "workshop" (default): everything, including unit costs, the materials total and where to source
+   * each part. "public": the parts and the work only, for pages anyone can see (the static demo).
+   */
+  audience?: "workshop" | "public";
 }
 
 /** The watchmaker's instructions for one order, laid out to work on screen and on paper. */
-export function BuildSheetView({ sheet, orderId, spareStrapId, showCosts = true }: BuildSheetViewProps) {
+export function BuildSheetView({ sheet, orderId, spareStrapId, audience = "workshop" }: BuildSheetViewProps) {
+  const internal = audience === "workshop";
   const bomTotal = sheet.bom.reduce((total, line) => total + line.qty * line.unitCostEur, 0);
 
   return (
@@ -66,15 +70,15 @@ export function BuildSheetView({ sheet, orderId, spareStrapId, showCosts = true 
               <p className="text-xs font-medium tracking-[0.08em] text-ink-faint uppercase">{bomSlotLabel(line, spareStrapId)}</p>
               <p className="mt-0.5 font-medium text-ink">{line.name}</p>
               {line.partId && <p className="font-mono text-xs break-all text-ink-faint">{line.partId}</p>}
-              <p className="mt-1 text-xs leading-relaxed text-ink-soft">{line.supplierHint}</p>
+              {internal && <p className="mt-1 text-xs leading-relaxed text-ink-soft">{line.supplierHint}</p>}
               <p className="mt-1 text-right text-sm text-ink tabular-nums">
-                {showCosts
+                {internal
                   ? `${line.qty} × ${formatCost(line.unitCostEur)} = ${formatCost(line.qty * line.unitCostEur)}`
                   : `Qty ${line.qty}`}
               </p>
             </li>
           ))}
-          {showCosts && (
+          {internal && (
             <li className="flex justify-between py-3 font-medium text-ink">
               <span>Materials total</span>
               <span className="font-semibold tabular-nums">{formatCost(bomTotal)}</span>
@@ -90,12 +94,12 @@ export function BuildSheetView({ sheet, orderId, spareStrapId, showCosts = true 
                   Slot
                 </th>
                 <th scope="col" className="py-2 pr-4 font-medium">
-                  Part and sourcing
+                  {internal ? "Part and sourcing" : "Part"}
                 </th>
-                <th scope="col" className={`py-2 text-right font-medium ${showCosts ? "pr-4" : ""}`}>
+                <th scope="col" className={`py-2 text-right font-medium ${internal ? "pr-4" : ""}`}>
                   Qty
                 </th>
-                {showCosts && (
+                {internal && (
                   <>
                     <th scope="col" className="py-2 pr-4 text-right font-medium">
                       Unit
@@ -114,10 +118,12 @@ export function BuildSheetView({ sheet, orderId, spareStrapId, showCosts = true 
                   <td className="py-2.5 pr-4">
                     <span className="font-medium text-ink">{line.name}</span>
                     {line.partId && <span className="ml-2 font-mono text-xs text-ink-faint">{line.partId}</span>}
-                    <span className="mt-0.5 block text-xs leading-relaxed text-ink-soft">{line.supplierHint}</span>
+                    {internal && (
+                      <span className="mt-0.5 block text-xs leading-relaxed text-ink-soft">{line.supplierHint}</span>
+                    )}
                   </td>
-                  <td className={`py-2.5 text-right tabular-nums ${showCosts ? "pr-4" : ""}`}>{line.qty}</td>
-                  {showCosts && (
+                  <td className={`py-2.5 text-right tabular-nums ${internal ? "pr-4" : ""}`}>{line.qty}</td>
+                  {internal && (
                     <>
                       <td className="py-2.5 pr-4 text-right tabular-nums">{formatCost(line.unitCostEur)}</td>
                       <td className="py-2.5 text-right tabular-nums">{formatCost(line.qty * line.unitCostEur)}</td>
@@ -126,7 +132,7 @@ export function BuildSheetView({ sheet, orderId, spareStrapId, showCosts = true 
                 </tr>
               ))}
             </tbody>
-            {showCosts && (
+            {internal && (
               <tfoot>
                 <tr className="border-t border-line-strong">
                   <th scope="row" colSpan={4} className="py-2.5 pr-4 text-right font-medium text-ink">
