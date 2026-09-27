@@ -1,5 +1,5 @@
-import { resolveSpec, SLOTS } from "@/domain/catalog";
-import type { Order, ResolvedSpec, SlotKey } from "@/domain/types";
+import { resolveExtras, resolveSpec, SLOTS } from "@/domain/catalog";
+import type { Order, ResolvedExtras, ResolvedSpec, SlotKey } from "@/domain/types";
 
 export interface CatalogueChange {
   /** The slot's label, e.g. "Dial". */
@@ -58,4 +58,12 @@ export function orderParts(order: Order): OrderParts {
     if (changed) changes.push({ label: def.label, ordered, now: now?.name ?? null });
   }
   return { parts: snapshot ?? live, orderedNames, changes };
+}
+
+/**
+ * An order's spare strap and add-ons as they were ordered: the order's own copy when it has one,
+ * else today's catalogue entries for the spec's ids.
+ */
+export function orderExtras(order: Pick<Order, "spec" | "extras">): ResolvedExtras {
+  return order.extras ?? resolveExtras(order.spec);
 }

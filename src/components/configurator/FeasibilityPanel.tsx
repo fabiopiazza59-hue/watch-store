@@ -5,6 +5,7 @@ import type { Issue, RepairResult, Severity, SlotKey, SuggestedFix, ValidationRe
 import { plural } from "../ui/format";
 import { AlertIcon, CheckIcon, CrossIcon, InfoIcon, SparkIcon, UndoIcon } from "../ui/icons";
 import { buttonClass, cardClass } from "../ui/styles";
+import { isExtrasIssue } from "./extrasOptions";
 
 const SEVERITY_GROUPS: { severity: Severity; title: string; blurb: string }[] = [
   {
@@ -51,6 +52,8 @@ interface FeasibilityPanelProps {
   undoableSpec: WatchSpec | null;
   onUndo: () => void;
   onRevealSlot: (slot: SlotKey) => void;
+  /** Brings the spare strap and add-ons into view, for issues about them (which involve no part). */
+  onRevealExtras: () => void;
 }
 
 export function FeasibilityPanel({
@@ -61,6 +64,7 @@ export function FeasibilityPanel({
   undoableSpec,
   onUndo,
   onRevealSlot,
+  onRevealExtras,
 }: FeasibilityPanelProps) {
   const [notice, setNotice] = useState<Notice | null>(null);
   const errors = report.issues.filter((issue) => issue.severity === "error");
@@ -153,6 +157,7 @@ export function FeasibilityPanel({
                       issue={issue}
                       onApplyFix={applyFix}
                       onRevealSlot={onRevealSlot}
+                      onRevealExtras={onRevealExtras}
                     />
                   ))}
                 </ul>
@@ -203,28 +208,33 @@ interface IssueItemProps {
   issue: Issue;
   onApplyFix: (fix: SuggestedFix) => void;
   onRevealSlot: (slot: SlotKey) => void;
+  onRevealExtras: () => void;
 }
 
-function IssueItem({ issue, onApplyFix, onRevealSlot }: IssueItemProps) {
+const involvesChipClass =
+  "min-h-8 rounded-full border border-line-strong bg-surface px-3 py-0.5 text-ink-soft hover:border-ink/40 hover:text-ink sm:min-h-0 sm:px-2";
+
+function IssueItem({ issue, onApplyFix, onRevealSlot, onRevealExtras }: IssueItemProps) {
   const { icon: Icon, tone, panel } = SEVERITY_STYLES[issue.severity];
+  const aboutExtras = isExtrasIssue(issue);
   return (
     <li className={`flex gap-3 rounded-lg border p-3 ${panel}`}>
       <Icon className={`mt-0.5 size-4 shrink-0 ${tone}`} />
       <div className="min-w-0 flex-1">
         <p className="text-sm leading-relaxed text-ink">{issue.message}</p>
-        {issue.slots.length > 0 && (
+        {(issue.slots.length > 0 || aboutExtras) && (
           <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-ink-faint">
             <span>Involves</span>
             {issue.slots.map((slot) => (
-              <button
-                key={slot}
-                type="button"
-                onClick={() => onRevealSlot(slot)}
-                className="min-h-8 rounded-full border border-line-strong bg-surface px-3 py-0.5 text-ink-soft hover:border-ink/40 hover:text-ink sm:min-h-0 sm:px-2"
-              >
+              <button key={slot} type="button" onClick={() => onRevealSlot(slot)} className={involvesChipClass}>
                 {getSlotDef(slot).label}
               </button>
             ))}
+            {aboutExtras && (
+              <button type="button" onClick={onRevealExtras} className={involvesChipClass}>
+                Extras
+              </button>
+            )}
           </p>
         )}
         {issue.fixes.length > 0 && (

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createBuildSheet } from "@/domain/buildSheet";
-import { CATALOG, DEFAULT_SPEC, resolveSpec } from "@/domain/catalog";
+import { CATALOG, DEFAULT_SPEC, EXTRAS, resolveExtras, resolveSpec } from "@/domain/catalog";
 import { priceSpec } from "@/domain/pricing";
 import type { Order } from "@/domain/types";
 import { orderSchema } from "@/domain/schemas";
-import { orderParts } from "./orderParts";
+import { orderExtras, orderParts } from "./orderParts";
 
 function order(overrides: Partial<Order> = {}): Order {
   return {
@@ -55,5 +55,22 @@ describe("orderParts", () => {
     expect(result.parts.dial).toBeUndefined();
     expect(result.orderedNames.dialId).toBe(dialName);
     expect(result.changes).toEqual([{ label: "Dial", ordered: dialName, now: null }]);
+  });
+});
+
+describe("orderExtras", () => {
+  const spec = { ...DEFAULT_SPEC, extras: { spareStrapId: "strap-nato-navy-22", itemIds: [EXTRAS[0].id] } };
+
+  it("uses the order's own copy of its extras, even for ones the catalogue has changed or dropped", () => {
+    const box = { ...EXTRAS[0], name: "Walnut box (old run)" };
+    const extras = orderExtras(order({ spec, extras: { spareStrap: undefined, items: [box] } }));
+    expect(extras.items.map((item) => item.name)).toEqual(["Walnut box (old run)"]);
+    expect(extras.spareStrap).toBeUndefined();
+  });
+
+  it("falls back on today's catalogue without a copy, and has none for orders from before extras", () => {
+    expect(orderExtras(order({ spec }))).toEqual(resolveExtras(spec));
+    expect(orderExtras(order({ spec })).spareStrap?.id).toBe("strap-nato-navy-22");
+    expect(orderExtras(order())).toEqual({ spareStrap: undefined, items: [] });
   });
 });

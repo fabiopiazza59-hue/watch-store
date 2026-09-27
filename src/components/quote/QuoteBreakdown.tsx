@@ -4,6 +4,7 @@ import { formatCost, formatPrice, vatNote } from "../ui/format";
 const GROUPS: { title: string; kinds: PriceLine["kind"][] }[] = [
   { title: "Parts", kinds: ["part"] },
   { title: "Personalization", kinds: ["personalization"] },
+  { title: "Extras", kinds: ["extra"] },
   { title: "Bench work and QC", kinds: ["labour", "qc"] },
   { title: "Packaging, shipping, warranty and fees", kinds: ["overhead"] },
 ];
@@ -23,26 +24,43 @@ export function QuoteBreakdown({ quote, variant }: QuoteBreakdownProps) {
   return variant === "customer" ? <CustomerBreakdown quote={quote} /> : <WorkshopBreakdown quote={quote} />;
 }
 
-/** The customer's view: the parts and work the price covers, then the price with its VAT. */
+const labelsOf = (quote: PriceQuote, kind: PriceLine["kind"]) =>
+  quote.lines.filter((line) => line.kind === kind).map((line) => line.label);
+
+/**
+ * The customer's view: the parts and work the price covers, the extras they added, then the price
+ * with its VAT.
+ */
 function CustomerBreakdown({ quote }: { quote: PriceQuote }) {
-  const personal = quote.lines.filter((line) => line.kind === "personalization");
   const included = [
-    ...quote.lines.filter((line) => line.kind === "part").map((line) => line.label),
-    ...personal.map((line) => line.label),
+    ...labelsOf(quote, "part"),
+    ...labelsOf(quote, "personalization"),
     "Assembly, regulation and a 24-hour test, by hand",
     "Timegrapher and pressure test before it ships",
     "Packaging and insured, tracked shipping",
   ];
+  const extras = labelsOf(quote, "extra");
   return (
     <div className="text-sm">
-      <p className="pt-3 text-xs font-medium tracking-[0.1em] text-ink-faint uppercase">Included</p>
-      <ul className="mt-1 flex flex-col gap-1 border-b border-line pb-3 text-ink-soft">
-        {included.map((item, index) => (
+      <div className="border-b border-line pb-3">
+        <IncludedList title="Included" items={included} />
+        {extras.length > 0 && <IncludedList title="Extras" items={extras} />}
+      </div>
+      <PriceTotals quote={quote} />
+    </div>
+  );
+}
+
+function IncludedList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <>
+      <p className="pt-3 text-xs font-medium tracking-[0.1em] text-ink-faint uppercase">{title}</p>
+      <ul className="mt-1 flex flex-col gap-1 text-ink-soft">
+        {items.map((item, index) => (
           <li key={`${item}-${index}`}>{item}</li>
         ))}
       </ul>
-      <PriceTotals quote={quote} />
-    </div>
+    </>
   );
 }
 

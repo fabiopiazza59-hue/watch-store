@@ -10,6 +10,7 @@ import { formatPrice, plural, vatNote } from "../ui/format";
 import { CrossIcon, UndoIcon } from "../ui/icons";
 import { eyebrowClass } from "../ui/styles";
 import { DesignerChat } from "./DesignerChat";
+import { EXTRAS_PANEL_ID, EXTRAS_TITLE_ID, ExtrasPanel } from "./ExtrasPanel";
 import { FeasibilityPanel, type RepairOutcome } from "./FeasibilityPanel";
 import { OrderPanel } from "./OrderPanel";
 import { PartPickers, pickerId, pickerToggleId } from "./PartPickers";
@@ -123,6 +124,12 @@ export function Configurator({ sharedSpec }: { sharedSpec: WatchSpec | null }) {
     document.getElementById(pickerToggleId(slot))?.focus({ preventScroll: true });
   }
 
+  /** Bring the extras into view, e.g. from an issue about the spare strap. */
+  function revealExtras() {
+    document.getElementById(EXTRAS_PANEL_ID)?.scrollIntoView({ block: "start" });
+    document.getElementById(EXTRAS_TITLE_ID)?.focus({ preventScroll: true });
+  }
+
   return (
     // Below xl, room at the bottom for the summary bar and the Undo toast.
     <div className="mx-auto max-w-3xl px-4 pt-8 pb-28 sm:px-6 lg:pt-12 xl:max-w-[1440px] xl:pb-12">
@@ -170,6 +177,7 @@ export function Configurator({ sharedSpec }: { sharedSpec: WatchSpec | null }) {
               undoableSpec={undoable?.next ?? null}
               onUndo={undoLast}
               onRevealSlot={revealSlot}
+              onRevealExtras={revealExtras}
             />
           </div>
           <div className="order-5 flex flex-col gap-6 xl:order-none">
@@ -207,6 +215,13 @@ export function Configurator({ sharedSpec }: { sharedSpec: WatchSpec | null }) {
             parts={parts}
             report={report}
             onChange={(personalization) => setSpec({ ...spec, personalization })}
+          />
+          <ExtrasPanel
+            spec={spec}
+            parts={parts}
+            report={report}
+            onChange={(extras) => setSpec({ ...spec, extras })}
+            onApplyFix={applyFix}
           />
         </section>
       </div>

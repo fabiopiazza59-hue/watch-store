@@ -1,10 +1,10 @@
 // Share links carry the whole design in the URL (`/?d=<base64url JSON>`), so they work without
 // any server-side storage. Anything decoded from a URL or browser storage is untrusted: it is
 // shape-checked here, and the rules engine still judges whether the parts fit.
-import { PERSONALIZATION_LIMITS } from "@/domain/catalog";
+import { CATALOG, EXTRAS, PERSONALIZATION_LIMITS } from "@/domain/catalog";
 import { normalizePersonalizationText, reviewText } from "@/domain/rules";
 import { clampDesignName, watchSpecSchema } from "@/domain/schemas";
-import type { Personalization, WatchSpec } from "@/domain/types";
+import type { OrderExtras, Personalization, WatchSpec } from "@/domain/types";
 
 /** Query parameter that holds a shared design. */
 export const SHARE_PARAM = "d";
@@ -28,20 +28,54 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Far above the six add-ons there are; stops a pathological list before it is looked at. */
+const MAX_EXTRA_ITEMS = 50;
+
+/**
+ * The extras of a saved or linked design. Anything malformed means none (undefined), rather than
+ * losing the whole design over it. Ids the catalogue doesn't list are dropped, and the add-ons put
+ * in catalogue order, each once; a strap that doesn't fit the case is kept, for the rules engine
+ * to flag with a fix.
+ */
+function readExtras(value: unknown): OrderExtras | undefined {
+  if (!isRecord(value)) return undefined;
+  const { spareStrapId = null, itemIds = [] } = value;
+  if (spareStrapId !== null && typeof spareStrapId !== "string") return undefined;
+  if (!Array.isArray(itemIds) || itemIds.length > MAX_EXTRA_ITEMS) return undefined;
+  if (!itemIds.every((id): id is string => typeof id === "string")) return undefined;
+  return {
+    spareStrapId: CATALOG.straps.some((strap) => strap.id === spareStrapId) ? spareStrapId : null,
+    itemIds: EXTRAS.filter((extra) => itemIds.includes(extra.id)).map((extra) => extra.id),
+  };
+}
+
+/** The design without its extras, checked against the schema; a name over the limit is shortened. */
+function readDesign(value: Record<string, unknown>): WatchSpec | null {
+  const parsed = watchSpecSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const onlyTheName = parsed.error.issues.every((issue) => issue.path.length === 1 && issue.path[0] === "name");
+  if (!onlyTheName || typeof value.name !== "string") return null;
+  const renamed = watchSpecSchema.safeParse({ ...value, name: clampDesignName(value.name) });
+  return renamed.success ? renamed.data : null;
+}
+
 /**
  * A design from JSON text, or null when the text isn't a well-formed design. Never throws.
  * A design whose only problem is a name over the length limit (saved by an older version) is kept,
- * with the name shortened, rather than lost.
+ * with the name shortened, rather than lost. Its extras are read on their own (see readExtras), so
+ * a design from before extras existed, or with extras that make no sense, still opens.
  */
 export function specFromJson(json: string): WatchSpec | null {
   try {
     const value: unknown = JSON.parse(json);
-    const parsed = watchSpecSchema.safeParse(value);
-    if (parsed.success) return parsed.data;
-    const onlyTheName = parsed.error.issues.every((issue) => issue.path.length === 1 && issue.path[0] === "name");
-    if (!onlyTheName || !isRecord(value) || typeof value.name !== "string") return null;
-    const renamed = watchSpecSchema.safeParse({ ...value, name: clampDesignName(value.name) });
-    return renamed.success ? renamed.data : null;
+    if (!isRecord(value)) return null;
+    const { extras, ...design } = value;
+    const spec = readDesign(design);
+    if (!spec) return null;
+    const read = readExtras(extras);
+    if (read) return { ...spec, extras: read };
+    delete spec.extras;
+    return spec;
   } catch {
     return null;
   }
