@@ -5,8 +5,8 @@ import {
   estimateBenchMinutes,
   PERSONALIZATION_SERVICES,
 } from "./buildSheet";
-import { CATALOG, resolveSpec, TEMPLATES } from "./catalog";
-import type { BuildSheet, Catalog, WatchSpec } from "./types";
+import { CATALOG, EXTRAS, NO_EXTRAS, resolveExtras, resolveSpec, TEMPLATES } from "./catalog";
+import type { BuildSheet, Catalog, OrderExtras, WatchSpec } from "./types";
 
 const DARK = "#15171a";
 const LIGHT = "#efe6d2";
@@ -528,5 +528,156 @@ describe("estimateBenchMinutes", () => {
     const result = sheet(GMT);
     expect(result.estimatedBenchMinutes).toBe(minutes(GMT));
     expect(result.summary).toContain(`About 2 h 5 min at the bench`);
+  });
+});
+
+describe("extras", () => {
+  const BOX = "extra-presentation-box";
+  const POUCH = "extra-travel-pouch";
+  const TOOL = "extra-spring-bar-tool";
+  const GIFT = "extra-gift-wrap";
+  const REGULATION = "extra-fine-regulation";
+  const CERTIFICATE = "extra-timing-certificate";
+  const extra = (id: string) => {
+    const found = EXTRAS.find((candidate) => candidate.id === id);
+    if (!found) throw new Error(`No extra ${id}`);
+    return found;
+  };
+  const withExtras = (spec: WatchSpec, extras: Partial<OrderExtras>): WatchSpec => ({ ...spec, extras: { ...NO_EXTRAS, ...extras } });
+  const EVERYTHING = withExtras(DIVER, { spareStrapId: "strap-nato", itemIds: EXTRAS.map((candidate) => candidate.id) });
+  const titles = (result: BuildSheet) => result.steps.map((s) => s.title);
+
+  it("writes complete, placeholder-free text with every extra", () => {
+    for (const spec of [EVERYTHING, withExtras(DRESS, { spareStrapId: "bracelet", itemIds: [GIFT] })]) {
+      const result = sheet(spec);
+      expect(allText(result)).not.toMatch(/undefined|NaN|null|\[object/);
+      expect(new Set(result.qcChecks.map((check) => check.id)).size).toBe(result.qcChecks.length);
+    }
+  });
+
+  it("leaves the sheet as it was when there are none", () => {
+    expect(sheet(withExtras(DIVER, {}))).toEqual(sheet(DIVER));
+  });
+
+  it("keeps every existing step as it is, adding its own in bench order", () => {
+    const plain = sheet(DIVER);
+    const result = sheet(EVERYTHING);
+    const kept = result.steps.filter((s) => plain.steps.some((p) => p.title === s.title));
+    expect(kept).toEqual(plain.steps);
+    expect(titles(result).filter((title) => !titles(plain).includes(title))).toEqual([
+      "Fine regulation (ordered)",
+      "Check the spare strap",
+      "Fill in the timing certificate",
+      "Pack and gift-wrap the order",
+    ]);
+    const at = (title: string) => titles(result).indexOf(title);
+    expect(at("Fine regulation (ordered)")).toBe(at("Time and regulate") + 1);
+    expect(at("Check the spare strap")).toBe(at("Set the watch and fit the strap") + 1);
+    expect(at("Fill in the timing certificate")).toBe(at("Run-in and final QC") + 1);
+    expect(at("Pack and gift-wrap the order")).toBe(titles(result).length - 1);
+  });
+
+  it("lists the spare strap and each add-on in the bill of materials", () => {
+    const catalog = fixtureCatalog();
+    const result = sheet(withExtras(DIVER, { spareStrapId: "strap-nato", itemIds: [BOX, REGULATION] }));
+    const nato = catalog.straps.find((strap) => strap.id === "strap-nato")!;
+    expect(result.bom.filter((line) => line.slot === "extra")).toEqual([
+      { slot: "extra", partId: "strap-nato", name: "Spare strap: Test NATO", qty: 1, unitCostEur: nato.costEur, supplierHint: nato.supplierHint },
+      ...[BOX, REGULATION].map(extra).map((item) => ({
+        slot: "extra",
+        partId: item.id,
+        name: item.name,
+        qty: 1,
+        unitCostEur: item.costEur,
+        supplierHint: item.supplierHint,
+      })),
+    ]);
+    expect(result.bom.at(-4)?.slot).toBe("strapId");
+  });
+
+  it("regulates the rate only, aiming for ±10 s/day dial up, and records the readings", () => {
+    const fine = step(sheet(withExtras(DIVER, { itemIds: [REGULATION] })), "Fine regulation (ordered)");
+    expect(fine?.detail).toContain("dial up (face up) within -10 to +10 s/day");
+    expect(fine?.detail).toContain("Adjust the rate only, with the regulator lever");
+    expect(fine?.detail).toContain("record them as they are");
+    expect(fine?.cautions.join(" ")).toContain("Don't chase the other positions");
+    expect(fine?.cautions.join(" ")).toContain("Leave the beat error alone");
+    expect(step(sheet(DIVER), "Fine regulation (ordered)")).toBeUndefined();
+  });
+
+  it("holds the timing check to the fine-regulation target dial up only, and the factory spec elsewhere", () => {
+    const criterion = qc(sheet(withExtras(DIVER, { itemIds: [REGULATION] })), "qc-rate")?.criterion;
+    expect(criterion).toMatch(/^Dial up within -10 to \+10 s\/day \(fine regulation was ordered\)/);
+    expect(criterion).toContain("9 o'clock up (crown down) and 6 o'clock up within the factory spec of -15 to +35 s/day");
+    expect(criterion).toContain("amplitude 250-310°");
+    expect(qc(sheet(DIVER), "qc-rate")?.criterion).toMatch(/^-15 to \+35 s\/day/);
+  });
+
+  it("checks a spare strap against the lugs and packs it with the spring-bar tool", () => {
+    const result = sheet(withExtras(DIVER, { spareStrapId: "strap-nato", itemIds: [TOOL] }));
+    const check = step(result, "Check the spare strap");
+    expect(check?.detail).toContain("spare Test NATO strap");
+    expect(check?.detail).toContain("the Test Diver's lug width");
+    expect(check?.detail).toContain("a NATO needs no spring bars of its own");
+    expect(step(result, "Pack the order")?.detail).toBe(
+      "Pack the spare Test NATO strap with the spring-bar tool. Then pack it for shipping so nothing can move in transit.",
+    );
+    expect(qc(result, "qc-spare-strap")?.criterion).toContain("Threads cleanly under the spring bars.");
+    expect(qc(result, "qc-contents")?.criterion).toBe("Packed with the spare Test NATO strap and the spring-bar tool.");
+  });
+
+  it("sizes a spare bracelet, fits its end links and brings the link tool", () => {
+    const result = sheet(withExtras(DIVER, { spareStrapId: "bracelet" }));
+    const check = step(result, "Check the spare strap");
+    expect(check?.detail).toContain("end links are made for this case");
+    expect(check?.detail).toContain("Size it to the customer's wrist");
+    expect(result.tools.some((tool) => tool.startsWith("Bracelet link tool"))).toBe(true);
+    expect(qc(result, "qc-spare-strap")?.criterion).toContain("end links sit flush");
+  });
+
+  it("puts the watch in its box, and records and signs the timing certificate after the final QC", () => {
+    const result = sheet(withExtras(DIVER, { itemIds: [BOX, POUCH, CERTIFICATE] }));
+    expect(step(result, "Fill in the timing certificate")?.detail).toContain("copy that check's timegrapher readings onto the card");
+    expect(step(result, "Fill in the timing certificate")?.detail).toContain("Sign and date the card.");
+    expect(step(result, "Pack the order")?.detail).toMatch(
+      /^Pack the watch in the presentation box, the leather travel pouch and the signed timing certificate\./,
+    );
+    expect(qc(result, "qc-timing-certificate")?.criterion).toMatch(/and signed\.$/);
+    expect(qc(sheet(DIVER), "qc-timing-certificate")).toBeUndefined();
+  });
+
+  it("gift-wraps with a card whose message is confirmed with the customer by email", () => {
+    const result = sheet(withExtras(DIVER, { itemIds: [BOX, GIFT] }));
+    const pack = step(result, "Pack and gift-wrap the order");
+    expect(pack?.detail).toContain("Wrap it by hand and add the card");
+    expect(pack?.cautions.join(" ")).toContain("confirm the card message with the customer by email");
+    expect(result.notes.join(" ")).toContain("Confirm the card message with the customer by email");
+    expect(result.tools).toContain("Wrapping paper, ribbon and a blank card");
+    expect(qc(result, "qc-contents")?.criterion).toContain("gift-wrapped");
+    expect(step(sheet(withExtras(DIVER, { itemIds: [GIFT] })), "Pack and gift-wrap the order")?.detail).toMatch(/^Wrap the watch's box by hand/);
+  });
+
+  it("adds no packing step or contents check for a bench service alone", () => {
+    const result = sheet(withExtras(DIVER, { itemIds: [REGULATION] }));
+    expect(titles(result).some((title) => title.startsWith("Pack"))).toBe(false);
+    expect(qc(result, "qc-contents")).toBeUndefined();
+  });
+
+  it("counts the extras' bench time and names them in the summary", () => {
+    const catalog = fixtureCatalog();
+    const spec = withExtras(DIVER, { spareStrapId: "strap-nato", itemIds: [GIFT, REGULATION] });
+    const expected = BENCH_MINUTES.base + BENCH_MINUTES.bezelInsert + BENCH_MINUTES.spareStrap + extra(GIFT).benchMinutes + extra(REGULATION).benchMinutes;
+    expect(estimateBenchMinutes(resolveSpec(spec, catalog), spec.personalization, resolveExtras(spec, catalog))).toBe(expected);
+    const result = sheet(spec);
+    expect(result.estimatedBenchMinutes).toBe(expected);
+    expect(result.summary).toMatch(/Extras: a spare Test NATO strap, gift wrapping and card and fine regulation\.$/);
+  });
+
+  it("flags extras missing from the catalogues instead of throwing", () => {
+    const result = sheet(withExtras(DIVER, { spareStrapId: "strap-nope", itemIds: ["extra-nope", BOX] }));
+    expect(result.notes[0]).toBe(
+      "Not buildable as specified: spare strap 'strap-nope' is not in the catalogue; add-on 'extra-nope' is not in the catalogue. Check the design's validation report.",
+    );
+    expect(result.bom.filter((line) => line.slot === "extra").map((line) => line.partId)).toEqual([BOX]);
   });
 });

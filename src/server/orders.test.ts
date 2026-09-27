@@ -3,10 +3,10 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SPEC, resolveSpec } from "@/domain/catalog";
+import { DEFAULT_SPEC, EXTRAS, resolveExtras, resolveSpec } from "@/domain/catalog";
 import { validateSpec } from "@/domain/rules";
 import type { ValidationReport } from "@/domain/types";
-import type { Order } from "@/domain/types";
+import type { Order, WatchSpec } from "@/domain/types";
 import {
   CorruptOrderError,
   createOrder,
@@ -153,6 +153,50 @@ describe("createOrder", () => {
     const read = await getOrder(order.id);
     expect(resolveSpec(read!.spec).dial).toBeUndefined();
     expect(read?.parts?.dial).toEqual(retired);
+  });
+});
+
+describe("orders with extras", () => {
+  const spec: WatchSpec = {
+    ...DEFAULT_SPEC,
+    extras: { spareStrapId: "strap-nato-navy-22", itemIds: ["extra-presentation-box", "extra-fine-regulation"] },
+  };
+
+  it("keep a copy of the extras as ordered, and price and build them", async () => {
+    const order = await createOrder({ ...INPUT, spec });
+    expect(order.spec.extras).toEqual(spec.extras);
+    expect(order.extras).toEqual(resolveExtras(spec));
+    expect(order.extras?.spareStrap?.id).toBe("strap-nato-navy-22");
+    expect(order.extras?.items.map((extra) => extra.id)).toEqual(["extra-presentation-box", "extra-fine-regulation"]);
+    expect(order.quote.extrasCostEur).toBeGreaterThan(0);
+    expect(order.buildSheet.bom.filter((line) => line.slot === "extra")).toHaveLength(3);
+    expect(await getOrder(order.id)).toEqual(order);
+  });
+
+  it("store no extras copy when there are none", async () => {
+    expect(await createOrder(INPUT)).not.toHaveProperty("extras");
+    const empty = await createOrder({ ...INPUT, spec: { ...DEFAULT_SPEC, extras: { spareStrapId: null, itemIds: [] } } });
+    expect(empty).not.toHaveProperty("extras");
+    expect(empty.quote.extrasCostEur).toBe(0);
+  });
+
+  it("still show what was ordered after an add-on leaves the catalogue", async () => {
+    const order = await createOrder({ ...INPUT, spec });
+    const file = path.join(dir, "orders", `${order.id}.json`);
+    const stored = JSON.parse(await readFile(file, "utf8")) as Order;
+    const retired = { ...EXTRAS[0], id: "extra-retired", name: "Retired box" };
+    await writeFile(file, JSON.stringify({ ...stored, extras: { ...stored.extras, items: [retired] } }));
+    expect((await getOrder(order.id))?.extras?.items).toEqual([retired]);
+  });
+
+  it("still read orders placed before extras existed", async () => {
+    const order = await createOrder(INPUT);
+    const { extrasCostEur, ...legacyQuote } = order.quote;
+    void extrasCostEur;
+    await writeFile(path.join(dir, "orders", `${order.id}.json`), JSON.stringify({ ...order, quote: legacyQuote }));
+    const read = await getOrder(order.id);
+    expect(read?.quote.extrasCostEur).toBe(0);
+    expect(read).toEqual(order);
   });
 });
 

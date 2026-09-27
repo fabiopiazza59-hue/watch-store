@@ -2,7 +2,7 @@
 // catalogue attributes best match the customer's intent. Compatibility always comes from the rules
 // engine (`evaluateOptions`); this module only expresses taste.
 import { CATALOG, NONE_OPTION_ID, findPart, resolveSpec } from "../catalog";
-import { evaluateOptions } from "../rules";
+import { evaluateOptions, evaluateSpareStraps } from "../rules";
 import type {
   BezelInsert,
   Catalog,
@@ -21,6 +21,7 @@ import type {
   WatchStyle,
 } from "../types";
 import { colorMatch, colorSimilarity, lightness, type ColorName } from "./colors";
+import type { SpareStrapWish } from "./extrasIntent";
 import type { DesignIntent } from "./intent";
 
 /**
@@ -75,6 +76,11 @@ const STRAP_LOOKAHEAD_WEIGHT = 0.3;
 const INSERT_LOOKAHEAD_WEIGHT = 0.4;
 /** Below this, a colour is a different colour: navy counts as blue, teal and green don't. */
 const MIN_COLOR_CREDIT = 0.5;
+/**
+ * Taken off a main strap of the kind the customer asked for as the spare ("a field watch with a
+ * spare NATO"): the NATO is meant to be the change of look.
+ */
+const SPARE_TYPE_PENALTY = 3;
 
 const RELATED_STYLES: Record<WatchStyle, WatchStyle[]> = {
   diver: ["gmt", "sport"],
@@ -289,6 +295,8 @@ function scoreCrystal(crystal: Crystal, { intent, style, lean }: ScoringContext)
 function scoreStrap(strap: Strap, { intent, style, parts }: ScoringContext): number {
   // The kind of strap asked for beats its colour: "a black leather strap" gets leather first.
   let score = intent.strapType === strap.type ? 8 : 0;
+  const spareType = intent.extras.spareStrap?.type;
+  if (spareType && strap.type === spareType && intent.strapType !== spareType) score -= SPARE_TYPE_PENALTY;
   score += style ? (STRAP_TYPES_BY_WATCH_STYLE[style][strap.type] ?? 0) : 0;
   if (intent.colors.strap.length > 0) score += 5 * bestMatch(strap.colorHex, intent.colors.strap);
   else if (strap.type === "leather" && style) score += colorMatch(strap.colorHex, LEATHER_COLOR_BY_STYLE[style]);
@@ -425,4 +433,45 @@ export function selectParts(
     decided.add(slot);
   }
   return { spec, choices };
+}
+
+/** What makes a good spare: the kind and colour asked for, else another kind than the main strap. */
+const SPARE_WISHED_TYPE = 10;
+const SPARE_OTHER_TYPE = 3;
+const SPARE_COLOR = 5;
+/** Keeping the spare already chosen, when it still answers the request. */
+const SPARE_KEEP_BONUS = 2;
+const SPARE_COST_WEIGHT = 0.01;
+
+/**
+ * The spare strap for `spec`, from the straps that fit its case (the rules engine decides that). The
+ * kind and colours the customer named come first; otherwise a spare is for variety: another kind and
+ * colour than the main strap, one that suits the watch's style. The main strap itself is chosen only
+ * when it is the one strap of the kind asked for, as two identical straps.
+ */
+export function chooseSpareStrap(spec: WatchSpec, wish: SpareStrapWish | undefined, catalog: Catalog = CATALOG): Strap | undefined {
+  const { strap: main, case: watchCase } = resolveSpec(spec, catalog);
+  const style = watchCase?.style;
+  const keepId = spec.extras?.spareStrapId;
+  const fitting = evaluateSpareStraps(spec, catalog)
+    .filter((option) => option.compatible && option.partId !== NONE_OPTION_ID)
+    .flatMap((option) => catalog.straps.filter((strap) => strap.id === option.partId));
+  const kindPoints = (strap: Strap) => {
+    if (wish?.type) return strap.type === wish.type ? SPARE_WISHED_TYPE : 0;
+    return main && strap.type !== main.type ? SPARE_OTHER_TYPE : 0;
+  };
+  const score = (strap: Strap) => {
+    let points = kindPoints(strap);
+    if (wish?.colors.length) points += SPARE_COLOR * bestMatch(strap.colorHex, wish.colors);
+    else if (main) points += 1 - colorSimilarity(strap.colorHex, main.colorHex);
+    if (style) points += STRAP_TYPES_BY_WATCH_STYLE[style][strap.type] ?? 0;
+    if (strap.id === keepId) points += SPARE_KEEP_BONUS;
+    return points - strap.costEur * SPARE_COST_WEIGHT;
+  };
+  const [best] = fitting
+    .filter((strap) => strap.id !== main?.id)
+    .map((strap) => ({ strap, score: score(strap) }))
+    .sort((a, b) => b.score - a.score);
+  const onlyOfItsKind = wish?.type && main?.type === wish.type && best?.strap.type !== wish.type;
+  return onlyOfItsKind ? main : (best?.strap ?? fitting.find((strap) => strap.id === main?.id));
 }

@@ -4,7 +4,8 @@ This document backs the numbers in `src/domain/catalog/`. Accurate dimensions ar
 configurator honestly say "this will fit". So for every value it records where it came from, how
 far to trust it, and what to confirm with a supplier before the first real orders.
 
-Research date: September 2026. Prices move a lot, so re-check them before quoting customers.
+Research date: September 2026 (catalogue expanded 27 September 2026). Prices move a lot, so re-check
+them before quoting customers.
 
 ## How to read the confidence levels
 
@@ -93,14 +94,21 @@ movement carries Seiko's figures and the hands carry the sellers' figures. The r
   crown. Many sellers ship dials with **four feet** and you snip the unused pair. The catalogue
   conservatively assigns each dial one crown position (see §5). *Verified.*
 - **Typical price** is €20-45 excl. VAT (for example, S$49 ≈ €33 for a branded-shop dial). *Verified.*
+- **Colours added in the September 2026 expansion** (salmon, blue and burgundy dress sunbursts, a
+  green NH34-ready GMT dial, a 3.8-crown green day-date diver, a 3 o'clock safety-orange diver, cream
+  day-date and stone field dials, and navy and olive 33.5 mm dials) are all stock colours at the
+  mod-part shops above. Their hex values are the catalogue's approximation for the preview, not the
+  maker's; check them against the supplier's photo when a dial is first ordered.
 
 ### Crystals (the case seat decides the diameter)
 | Case pattern | Crystal | Confidence |
 |---|---|---|
 | SKX-style 42 mm (and SSK-style GMT) | 31.5 mm. Flat sapphire is about 2.9-3.0 mm thick; double-dome is about 4.5-4.7 mm overall. | Verified |
 | 36-39 mm field / "GS-style" / 34 mm pilot NH cases | 29.5 mm. Flat 29.5 × 1.5 mm; double-dome 29.5 × 1.5 × 3 mm. | Verified (one maker, several cases) |
+| 36 mm ultra-thin field pattern (`case-field-36`) | 29.5 × **1.0** mm flat, fitted by the maker (`crystal-sapphire-flat-295-thin`). The 1.5 mm crystals share the diameter but stand about 0.5 mm prouder. | Verified (maker's page) |
+| 36 mm "GS-style" v2 (`case-dress-36`) | 29.5 × 1.5 × 3 mm double-dome, fitted by the maker | Verified (maker's page) |
 | SKX013-style 38 mm | 28.0 mm | Verified (not stocked) |
-| 40 mm dive/GMT pattern (`case-gmt-40`, `case-diver-bronze-40`) | **30.5 mm** | Estimate |
+| 40 mm dive/GMT pattern (`case-gmt-40`, `case-diver-bronze-40`, `case-diver-40`) | **30.5 mm** | Estimate |
 | 39 mm vintage diver (`case-diver-39`) | **30.0 mm** domed | Estimate |
 | 39 mm wide-dial pilot and titanium field | **34.5 mm** | Estimate |
 
@@ -120,8 +128,14 @@ the dome (Esslinger's guide); the build sheet says so and adds the die to the to
 | SKX013-style | 33.7 × 27.5 mm | Verified (not stocked) |
 | Turtle-style | 39.1 × 32.5 mm | Verified (not stocked) |
 
-Because the SKX-style and 40 mm patterns share inserts, the catalogue's 38 mm inserts fit three
-cases. The 36.5 mm inserts fit only the compact diver. That is a real, physical incompatibility.
+Because the SKX-style and 40 mm patterns share inserts, the catalogue's 38 mm inserts fit four
+cases (Classic Diver 42, Travel GMT 40, Bronze Diver 40, Steel Diver 40). The 36.5 mm inserts fit
+only the compact diver. That is a real, physical incompatibility.
+
+The compact seat now also has a black ceramic insert (`insert-dive-black-ceramic-365`). The seat
+size is single-source, and ceramic inserts for it would come from the case maker's own range: confirm
+the maker sells that seat in ceramic before offering it. The green ceramic dive and green/black GMT
+inserts are stock 38 × 30.6 mm items.
 
 Prices: aluminium inserts cost €10-20 and ceramic €30-40 (for example, US$36 for a flat ceramic
 SKX insert, S$60 for branded ceramic). *Verified.*
@@ -137,6 +151,12 @@ they are never used in part names.
 - **Lengths for 33.5 mm dials:** the catalogue assumes about 10.5 / 15-15.5 / 16 mm. *Estimate.*
   These hands would foul the chapter ring on a 28.5 mm dial, which is a real error.
 - **GMT hands** for the NH34 have a 2.20 mm hole and are 8-12 mm long. *Verified.*
+- **Short NH34 seconds hands.** For three-hand cases, one case maker asks for a seconds hand under
+  12 mm (or a seconds-hand cap). `hands-gmt-sword-gilt` is stocked with an 11.5 mm seconds hand,
+  which the `hand-clearance` rule accepts under any crystal. *Estimate:* confirm the length when
+  ordering the set.
+- **Large batons** (`hands-baton-silver-large`) use the same estimated 33.5 mm-dial lengths as the
+  other large sets (10.5 / 15.5 / 16 mm).
 - **Price:** €10-30 a set (for example, S$38 ≈ €26 at a branded shop). GMT sets cost a little more.
 
 ### Cases
@@ -151,6 +171,9 @@ they are never used in part names.
 | Travel GMT 40 | 40 mm dive/GMT pattern with bidirectional bezel | 20 mm lugs, 28.5 dial, 38 × 30.6 insert, 200 m, maker lists NH34 | Estimate (bezel action and crystal): the cited 40 mm case has a one-way 120-click bezel |
 | Titanium Field 39 | Ti-2 pilot/field pattern | 48.6 mm lug-to-lug, 12 mm thick, 20 mm lugs, 33-34 dial, 200 m | Verified, crystal estimated |
 | Bronze Diver 40 | CuSn8 40 mm dive pattern | 47.2 mm lug-to-lug, 13.5 mm thick, 20 mm lugs, 3 crown, 38 × 30.6 insert, 200 m | Verified, crystal estimated |
+| Field 36 | 36 mm ultra-thin explorer-style pattern, solid caseback | 43 mm lug-to-lug, 9.96 mm thick, 20 mm lugs, 3 crown (screw-down), 28.5 dial, 29.5 × 1.0 flat sapphire, SKX013-spec chapter ring bought separately, 100 m; maker lists NH35/36/38, not the NH34 | Verified (maker's page) |
+| Dress 36 Solid Back | "GS-style" 36 mm v2 with the solid NH caseback | 43 mm lug-to-lug, 12.8 mm thick (solid back), 20 mm lugs, screw-down crown, 28.5 dial, 29.5 × 1.5 × 3 double-dome, SKX013-spec chapter ring bought separately, 200 m tested; maker says the NH34 does **not** fit | Verified (maker's page) |
+| Steel Diver 40 | 40 mm sub-style dive pattern, one-way 120-click bezel, solid back | 40 mm, 13.5 mm thick, 20 mm lugs, 28.5 dial, 3 crown, 38 × 30.6 insert, 20 ATM solid back (10 ATM glass back), maker lists NH34 | Verified; lug-to-lug (47.5 mm) and crystal estimated |
 
 - **Water resistance:** a display caseback often drops the rating (for example, 200 m solid vs 100 m
   glass on the same case). Always quote the rating of the exact variant you order. Where a maker
@@ -159,9 +182,21 @@ they are never used in part names.
   and the build sheet never pressure-tests above it. A pressure test below the rating is not a pass.
 - **Hand clearance** (`handClearanceMm`) is an estimate for every case. No maker publishes it.
   Thin cases (Field 38, Black Sport 42) are set below 1.6 mm, so an NH34 there gets the "tight
-  stack" warning.
+  stack" warning. So are the Field 36 and Dress 36, whose makers don't list the NH34 (the Dress 36's
+  maker says it doesn't fit at all; see §5).
+- **36 mm cases and lug width.** The best-documented 36 mm NH cases (explorer-, "GS"- and
+  datejust-style 36 mm cases from a Singapore maker) all have **20 mm** lugs and 43 mm lug-to-lug.
+  36 mm NH cases with 18 mm lugs exist (two budget listings), but they are 14.5 mm thick, domed, and
+  publish no lug-to-lug or crystal size, so none is stocked and the catalogue has no 18 mm straps.
+- **Skin divers.** The slim 38 mm skin-diver cases found are SKX013-pattern cases (28.0 mm crystal,
+  33.7 × 27.5 mm insert, SKX013 chapter ring). They are not stocked: the preview can't draw that
+  narrow chapter ring (it needs the insert's inner edge at least 0.2 mm outside the ring), and the
+  proprietary-part versions take only their own crystal and insert. The "Teal Skin Diver" template
+  uses the Compact Diver 39 instead.
 - **Case prices** are about €40-90 excl. VAT for steel, €80-130 for bronze or titanium, and more at
-  premium shops. Lead times from Asian mod shops to the EU are 2-3 weeks.
+  premium shops. Lead times from Asian mod shops to the EU are 2-3 weeks. The Field 36 (S$120 case)
+  and Dress 36 (S$145 case) are priced at €95 and €105 because their screw-down crown and SKX013-spec
+  chapter ring are bought separately and are counted in the case's cost.
 
 ### Straps
 - The SKX-style pattern uses **22 mm** lugs. Nearly every 36-40 mm NH case uses **20 mm**.
@@ -169,6 +204,8 @@ they are never used in part names.
   `compatibleCaseIds`. Straight-end bracelets and all straps are universal at the right width.
 - Typical prices: NATO €10-15, FKM rubber €15-30, canvas €15-25, leather €25-60, fitted steel
   bracelet €40-80, titanium bracelet €60-100.
+- **Naming.** Perforated 1960s-style rubber is called "basket-weave" in part names: "Tropic" is a
+  strap maker's brand. Suede straps use the `leather` type, which the preview draws with stitching.
 
 ## 3. Prices used in the catalogue
 
@@ -181,7 +218,7 @@ distributors. Observed retail prices are converted approximately.
 | NH36A | US$75-85, S$100 | €58 |
 | NH34A | US$110-168, S$190-200, €51-82 (marketplaces) | €95 |
 | NH38A | US$87, S$190 | €70 |
-| Steel case | US$18-73 (budget), S$120-240 (premium) | €40-70 |
+| Steel case | US$18-73 (budget), S$120-240 (premium) | €40-70; €95-105 for the 36 mm cases with their separately sold crown and chapter ring |
 | Bronze / titanium case | US$47-88 | €80-90 |
 | Dial | S$49 | €24-40 |
 | Hands | S$38 | €14-26 |
@@ -209,6 +246,16 @@ will show your real costs; then update `costEur`.
    sheet's parts list says which).
 7. **Hand clearance:** measure dial-to-crystal height in each case during the first build and
    replace the estimates. On the first NH34 build, check the 13 mm seconds hand against the crystal.
+8. **Steel Diver 40:** lug-to-lug (47.5 mm assumed) and the crystal seat (30.5 mm, shared estimate);
+   order the solid caseback, since the glass back is rated 10 ATM.
+9. **Field 36:** whether a 1.5 mm-thick 29.5 mm crystal (flat or double-dome) seals in this
+   ultra-thin case; until then, fit the case's own 1.0 mm crystal.
+10. **Dress 36 Solid Back and Field 36:** order the SKX013-spec chapter ring and the screw-down crown
+   with each case, and the NH caseback in solid steel for engraving.
+11. **Compact black ceramic insert:** that the 39 mm diver's maker sells its 36.5 × 30.5 mm seat in
+   ceramic.
+12. **Short GMT seconds hand** (`hands-gmt-sword-gilt`, 11.5 mm) and the **large batons**
+   (`hands-baton-silver-large`): the real lengths.
 
 ## 5. Real constraints the catalogue/rules cannot express yet
 
@@ -221,7 +268,12 @@ the `dial-center-hole` rule.)
 - **Dials with feet for several crown positions** (a list instead of a single `crownPosition`).
 - **Dial aperture** (open-heart at 9 o'clock), which only makes sense with the NH38.
 - **Separate chapter rings.** Some premium cases need an SKX013-spec chapter ring bought separately.
-  Our cases include the ring when they have one.
+  Our cases include the ring (and its cost) when they have one.
+- **A case that can't take the NH34 at all.** The Dress 36's maker says an NH34 doesn't fit; the
+  rules can only warn (tight hand stack). A `WatchCase.movementsExcluded` (or a per-case list of
+  calibres) would let `movement-family` make it an error.
+- **Crystal thickness per seat.** Ultra-thin cases take thinner crystals than the standard seat of
+  the same diameter; `crystal-fit` only compares diameters.
 
 ## Sources
 
@@ -259,11 +311,19 @@ Cases
 - Lucius Atelier, 34 mm pilot case: https://luciusatelier.com/products/pilot-watch-case-34mm-ultra-thin-edition
 - Lucius Atelier, 42 mm SKX-pattern case: https://luciusatelier.com/products/diver-watch-case-42mm-skx007-submariner-edition-fits-nh-gmt-movements
 - Lucius Atelier, case prices: https://luciusatelier.com/collections/watch-cases
-- Tandorio, 40 mm dive case: https://tandoriowatch.com/products/40mm-sub-case-nh35-sliver-with-sapphire-crystal
+- Tandorio, 40 mm dive case (Steel Diver 40: 13.5 mm, 20 mm lugs, 28.5 dial, 120-click one-way bezel, 20 ATM solid / 10 ATM glass back, NH34/35/36): https://tandoriowatch.com/products/40mm-sub-case-nh35-sliver-with-sapphire-crystal
 - Tandorio, 39 mm vintage dive case: https://tandoriowatch.com/products/39mm-vintage-submariner-watch-case
 - Tandorio, 39 mm vintage pilot case: https://tandoriowatch.com/products/39mm-vintage-pilot-case-33-5mm-dial
 - Tandorio, 39.5 mm GS-pattern case: https://tandoriowatch.com/products/39-5mm-nh35-case-gs-case-mechanical-watch-case
 - Tandorio, Ti-2 titanium case: https://tandoriowatch.com/products/ti-2-titanium-pilot-watch-case
 - Tandorio, CuSn8 bronze case: https://tandoriowatch.com/products/40mm-cusn8-bronze-case
 - Tandorio, 39 mm GMT case: https://tandoriowatch.com/products/39mm-exp-24-hour-gmt-watch-case-fixed-bezel
+- Lucius Atelier, Explorer-pattern 36 mm ultra-thin case (43 mm, 9.96 mm, 20 mm lugs, 29.5 × 1.0 mm crystal, 100 m): https://luciusatelier.com/products/explorer-watch-case-36mm-ultra-thin-edition
+- Lucius Atelier, GS-pattern 36 mm v2 case (43 mm, 12.8 mm solid back, 29.5 × 1.5 × 3 mm double-dome, 200 m, not NH34): https://luciusatelier.com/products/gs-watch-case-36mm-v2
+- Lucius Atelier, 1908-pattern 36 mm case (28.6 mm crystal, NH34 seconds hand under 12 mm; not stocked): https://luciusatelier.com/products/1908-watch-case-36mm-ultra-thin-edition-nh34-ready
+- Lucius Atelier, SKX013-pattern 38 mm cases (skin-diver candidates; not stocked): https://luciusatelier.com/products/skx013-watch-case-38mm-nh34-ready and https://luciusatelier.com/products/skx013-diver-38-black-ultra-thin-edition
+- namokiMODS, NMK924 3 o'clock no-crown-guard SKX013 case (38 mm, 44.5 mm, 20 mm lugs): https://www.namokimods.com/products/nmk924-3h-ncg-skx013-watch-case-polished-finish
+- namokiMODS, NMK911 62MAS-pattern case (41 mm, takes SKX007 parts; WR "as OEM", not stocked): https://www.namokimods.com/products/nmk911-62mas-skx007-srpd-watch-case-polished-finish
+- Tandorio, 36 mm cases with 18 mm lugs (14.5 mm thick; not stocked): https://tandoriowatch.com/products/36mm-watch-case and https://tandoriowatch.com/products/tandorio-36mm-sandblasted-watch-case-200bar-domed-sapphire-crystal-fit-nh35-nh36-nh38-nh70-nh72-pt5000-eta2824-sw200-movement
+- Tandorio, 62MAS-pattern 40 mm case (36.9 × 28.7 mm insert; not stocked): https://tandoriowatch.com/products/40mm-watch-case-62mas-case-type-nh35a-nh36-pt5000-eta2824-movement-316l-stainless-steel-diving-case-120-click-circle-20atm-parts
 - Worn & Wound, SKX007 review (42.5 mm, 46 mm lug-to-lug, 13.25 mm, 22 mm lugs, crown at 4, 200 m): https://wornandwound.com/review/seiko-skx007-review/

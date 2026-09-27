@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Catalog, Dial, HandSet, Part, WatchCase } from "../types";
-import { validateSpec } from "../rules";
+import { reviewText, validateSpec } from "../rules";
 import { CATALOG, DEFAULT_SPEC, TEMPLATES, dateWheelColour, resolveSpec } from ".";
 
 const CATEGORY_BY_KEY: Record<keyof Catalog, Part["category"]> = {
@@ -103,6 +103,25 @@ describe("catalogue integrity", () => {
       }
     }
   });
+
+  it("gives every colour as a 6-digit hex value, which the preview and date-wheel rule read", () => {
+    const hex = /^#[0-9a-f]{6}$/i;
+    for (const part of allParts) {
+      const colours = Object.entries(part).filter(([key]) => key.endsWith("ColorHex") || key === "colorHex");
+      for (const [key, value] of colours) expect(value, `${part.id}.${key}`).toMatch(hex);
+    }
+  });
+
+  it("names parts and starting designs without other watch companies' names or Swiss indications", () => {
+    const texts = [
+      ...allParts.map((p) => [p.id, p.name] as const),
+      ...TEMPLATES.flatMap((t) => [[t.id, t.name] as const, [t.id, t.description] as const, [t.id, t.spec.name] as const]),
+    ];
+    for (const [id, text] of texts) {
+      const review = reviewText(text);
+      expect([...review.trademarks, ...review.protectedIndications], `${id}: ${text}`).toEqual([]);
+    }
+  });
 });
 
 describe("catalogue coverage", () => {
@@ -137,6 +156,26 @@ describe("catalogue coverage", () => {
     expect(distinct(CATALOG.bezelInserts.map((i) => i.outerMm))).toBeGreaterThanOrEqual(2);
     expect(distinct(CATALOG.movements.map((m) => m.dateDisplay))).toBeGreaterThanOrEqual(3);
   });
+
+  it("offers a dress case with a solid caseback, so a dress watch can be engraved", () => {
+    const engravable = CATALOG.cases.filter((c) => c.style === "dress" && c.caseback === "solid");
+    expect(engravable.length).toBeGreaterThanOrEqual(1);
+    for (const c of engravable) {
+      const dial = CATALOG.dials.find((d) => d.style === "dress" && dialFitsCase(d, c));
+      expect(dial, c.id).toBeDefined();
+    }
+  });
+
+  it("offers cases of 36mm or less for smaller wrists, in more than one style", () => {
+    const small = CATALOG.cases.filter((c) => c.diameterMm <= 36);
+    expect(new Set(small.map((c) => c.style)).size).toBeGreaterThanOrEqual(2);
+  });
+
+  it("offers the wide-opening cases a choice of dials and hands", () => {
+    const wide = CATALOG.dials.filter((d) => d.diameterMm === 33.5);
+    expect(wide.length).toBeGreaterThanOrEqual(5);
+    expect(CATALOG.hands.filter((h) => wide.some((d) => handsFitDial(h, d))).length).toBeGreaterThanOrEqual(3);
+  });
 });
 
 describe("NH34 seconds-hand clearance", () => {
@@ -158,6 +197,20 @@ describe("NH34 seconds-hand clearance", () => {
     expect(issue.severity).toBe("warning");
     expect(issue.fixes[0]?.patch).toEqual({ crystalId: "crystal-sapphire-dd-295" });
     expect(clearanceWarnings(nh34Spec("case-dress-39", "crystal-sapphire-dd-295"))).toEqual([]);
+  });
+
+  it("lets the short-seconds GMT set clear a flat crystal in a case made for three-hand movements", () => {
+    const bronze = nh34Spec("case-diver-bronze-40", "crystal-sapphire-flat-305");
+    expect(clearanceWarnings(bronze)).toHaveLength(1);
+    expect(clearanceWarnings({ ...bronze, handsId: "hands-gmt-sword-gilt" })).toEqual([]);
+  });
+
+  it("warns about an NH34 in the small cases whose makers don't list it", () => {
+    for (const caseId of ["case-field-36", "case-dress-36"]) {
+      const spec = { ...nh34Spec(caseId, "crystal-sapphire-dd-295"), handsId: "hands-gmt-sword-gilt" };
+      const tight = validateSpec(spec).issues.filter((i) => i.ruleId === "hand-clearance" && i.slots.includes("caseId"));
+      expect(tight.map((i) => i.severity), caseId).toEqual(["warning"]);
+    }
   });
 
   it("leaves the Travel GMT, in a case sold NH34-ready with its flat crystal, without a clearance warning", () => {
@@ -206,4 +259,20 @@ describe("starting designs", () => {
       expect(report.buildable).toBe(true);
     },
   );
+
+  it.each(STARTING_SPECS.map(({ label, spec }) => [label, spec] as const))(
+    "%s carries no warnings: nothing the customer has to accept knowingly",
+    (_, spec) => {
+      const warnings = validateSpec(spec).issues.filter((i) => i.severity === "warning");
+      expect(warnings.map((i) => `${i.ruleId}: ${i.message}`)).toEqual([]);
+    },
+  );
+
+  it("are named after themselves and add no extras, which stay the customer's choice", () => {
+    for (const t of TEMPLATES) {
+      expect(t.spec.name, t.id).toBe(t.name);
+      expect("extras" in t.spec, t.id).toBe(false);
+      expect(t.spec.personalization, t.id).toEqual({ dialText: "", casebackEngraving: "" });
+    }
+  });
 });

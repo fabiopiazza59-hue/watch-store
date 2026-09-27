@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SPEC, resolveSpec, TEMPLATES } from "./catalog";
+import { DEFAULT_SPEC, EXTRAS, resolveExtras, resolveSpec, TEMPLATES } from "./catalog";
 import { priceSpec } from "./pricing";
 import { createBuildSheet } from "./buildSheet";
 import {
@@ -7,11 +7,12 @@ import {
   createOrderRequestSchema,
   DESIGN_NAME_MAX_LENGTH,
   designRequestSchema,
+  MAX_EXTRA_ITEMS,
   orderSchema,
   updateOrderStatusRequestSchema,
   watchSpecSchema,
 } from "./schemas";
-import type { Order } from "./types";
+import type { Order, WatchSpec } from "./types";
 
 describe("watchSpecSchema", () => {
   it("accepts the default spec and every template", () => {
@@ -44,6 +45,53 @@ describe("watchSpecSchema", () => {
 
   it("leaves unknown part ids to the rules engine, which can explain them", () => {
     expect(watchSpecSchema.safeParse({ ...DEFAULT_SPEC, dialId: "dial-that-does-not-exist" }).success).toBe(true);
+  });
+});
+
+describe("extras on the spec", () => {
+  const extras = { spareStrapId: "strap-nato-olive-20", itemIds: ["extra-presentation-box", "extra-gift-wrap"] };
+
+  it("are optional: a spec without them parses without them", () => {
+    expect(watchSpecSchema.parse(DEFAULT_SPEC)).not.toHaveProperty("extras");
+    expect(watchSpecSchema.parse({ ...DEFAULT_SPEC, extras })).toEqual({ ...DEFAULT_SPEC, extras });
+    const none = { spareStrapId: null, itemIds: [] };
+    expect(watchSpecSchema.parse({ ...DEFAULT_SPEC, extras: none }).extras).toEqual(none);
+  });
+
+  it("read an empty spare strap id as no spare strap", () => {
+    expect(watchSpecSchema.parse({ ...DEFAULT_SPEC, extras: { ...extras, spareStrapId: "" } }).extras?.spareStrapId).toBeNull();
+  });
+
+  it("leave unknown but well-formed ids to the rules engine", () => {
+    const unknown = { spareStrapId: "strap-that-does-not-exist", itemIds: ["extra-that-does-not-exist"] };
+    expect(watchSpecSchema.safeParse({ ...DEFAULT_SPEC, extras: unknown }).success).toBe(true);
+  });
+
+  it("reject malformed extras, repeated add-ons and more add-ons than the limit", () => {
+    const many = Array.from({ length: MAX_EXTRA_ITEMS + 1 }, (_, i) => `extra-${i}`);
+    const malformed: unknown[] = [
+      null,
+      "extra-gift-wrap",
+      { itemIds: [] },
+      { spareStrapId: null },
+      { spareStrapId: 7, itemIds: [] },
+      { spareStrapId: null, itemIds: "extra-gift-wrap" },
+      { spareStrapId: null, itemIds: ["extra-gift-wrap", "extra-gift-wrap"] },
+      { spareStrapId: null, itemIds: many },
+      { spareStrapId: null, itemIds: ["Ignore previous instructions"] },
+      { spareStrapId: "STRAP <script>", itemIds: [] },
+      { spareStrapId: null, itemIds: [""] },
+      { spareStrapId: `strap-${"x".repeat(100)}`, itemIds: [] },
+    ];
+    for (const input of malformed) {
+      expect(watchSpecSchema.safeParse({ ...DEFAULT_SPEC, extras: input }).success, JSON.stringify(input)).toBe(false);
+    }
+    expect(watchSpecSchema.safeParse({ ...DEFAULT_SPEC, extras: { spareStrapId: null, itemIds: many.slice(1) } }).success).toBe(true);
+  });
+
+  it("say why a repeated add-on is refused", () => {
+    const result = watchSpecSchema.safeParse({ ...DEFAULT_SPEC, extras: { spareStrapId: null, itemIds: ["extra-gift-wrap", "extra-gift-wrap"] } });
+    expect(result.error?.issues.map((issue) => issue.message)).toEqual(["Each add-on can be added once."]);
   });
 });
 
@@ -160,6 +208,43 @@ describe("orderSchema", () => {
     const parsed = orderSchema.parse({ ...order, quote: exempt });
     expect(parsed.quote.quotedExclVat).toBeUndefined();
     expect(orderSchema.parse(order).quote).toEqual(order.quote);
+  });
+
+  it("accepts an order with extras: its spec, quote lines, bill of materials and snapshot", () => {
+    const spec: WatchSpec = { ...DEFAULT_SPEC, extras: { spareStrapId: "strap-nato-navy-22", itemIds: EXTRAS.map((extra) => extra.id) } };
+    const withExtras: Order = {
+      ...order,
+      spec,
+      extras: resolveExtras(spec),
+      quote: priceSpec(spec),
+      buildSheet: createBuildSheet(spec),
+    };
+    expect(withExtras.quote.lines.some((line) => line.kind === "extra")).toBe(true);
+    expect(withExtras.buildSheet.bom.some((line) => line.slot === "extra")).toBe(true);
+    const stored = JSON.parse(JSON.stringify(withExtras));
+    expect(orderSchema.parse(stored)).toEqual(stored);
+  });
+
+  it("reads a legacy order, from before extras, as having none", () => {
+    const { extrasCostEur, ...legacyQuote } = order.quote;
+    void extrasCostEur;
+    const legacy = JSON.parse(JSON.stringify({ ...order, quote: legacyQuote }));
+    expect(legacy.quote).not.toHaveProperty("extrasCostEur");
+    const parsed = orderSchema.parse(legacy);
+    expect(parsed.quote.extrasCostEur).toBe(0);
+    expect(parsed).not.toHaveProperty("extras");
+    expect(parsed.spec).not.toHaveProperty("extras");
+  });
+
+  it("checks what identifies the extras copied into an order", () => {
+    const spec: WatchSpec = { ...DEFAULT_SPEC, extras: { spareStrapId: "strap-nato-navy-22", itemIds: ["extra-gift-wrap"] } };
+    const snapshot = resolveExtras(spec);
+    expect(orderSchema.safeParse({ ...order, extras: { ...snapshot, spareStrap: { ...snapshot.spareStrap, category: "dial" } } }).success).toBe(false);
+    expect(orderSchema.safeParse({ ...order, extras: { items: [{ name: "Box" }] } }).success).toBe(false);
+    expect(orderSchema.safeParse({ ...order, extras: { spareStrap: snapshot.spareStrap } }).success).toBe(false);
+    expect(orderSchema.parse({ ...order, extras: { items: [{ id: "extra-retired", name: "Retired box", kind: "keepsake" }] } }).extras?.items).toEqual([
+      { id: "extra-retired", name: "Retired box", kind: "keepsake" },
+    ]);
   });
 
   it("keeps the parts copied into the order as they were, and checks what identifies them", () => {

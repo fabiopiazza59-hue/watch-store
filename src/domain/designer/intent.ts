@@ -5,6 +5,7 @@ import { normalizePersonalizationText, reviewText } from "../rules";
 import { clampDesignName } from "../schemas";
 import type { DateWindow, Dial, Strap, WatchCase, WatchStyle } from "../types";
 import { colorForWord, type ColorName } from "./colors";
+import { parseExtras, wantsExtras, type ExtrasIntent } from "./extrasIntent";
 
 /** Parts of the watch a colour can be asked for. */
 export type ColorTarget = "dial" | "strap" | "bezel" | "hands" | "case";
@@ -66,6 +67,13 @@ export interface DesignIntent {
   unquotedText?: "dial" | "caseback";
   clearDialText: boolean;
   clearEngraving: boolean;
+  /** A spare strap and add-ons to put in the order, or take out of it. */
+  extras: ExtrasIntent;
+  /**
+   * Quoted text meant for the gift card ("a card saying 'Happy 40th'"). The card's message isn't part
+   * of the design (the workshop confirms it by email), so it is only acknowledged, never printed.
+   */
+  cardMessage?: string;
   /** Other watch companies' trademarks the customer mentioned (outside quoted text). */
   brands: string[];
   /** The customer mentioned a protected Swiss indication ("Swiss Made"). */
@@ -260,12 +268,13 @@ const QUOTE_PATTERN = /(^|[\s(:,])(?:["“]([^"”\n]{1,120})["”]|['‘]([^'�
 const ENGRAVING_CUE = /engrav|case ?back|\bback\b|\brear\b/g;
 const DIAL_CUE = /\bdial\b|\bprint|\bface\b|\bwrit/g;
 const NAME_CUE = /\b(?:call|name|named|called)\b/g;
+const CARD_CUE = /\bcard\b/g;
 /** Unquoted text after an explicit label and colon: "engraving: For Sam", "dial text: Est. 2026". */
 const LABELLED_TEXT = /\b(engraving|engrave|case ?back|dial text)\s*:\s*([^\n]+?)[\s.!]*$/i;
 const UNQUOTED_ENGRAVING = /\bengrav(?:e|ed|ing)\b/;
 const UNQUOTED_DIAL_TEXT = /\b(?:dial text|text on the dial|print(?:ed)? (?:on|onto) the dial|write on the dial)\b/;
 
-type QuoteTarget = "dial" | "caseback" | "name";
+type QuoteTarget = "dial" | "caseback" | "name" | "card";
 
 interface QuotedText {
   text: string;
@@ -284,6 +293,7 @@ function quoteTarget(before: string, after: string): QuoteTarget {
     ["caseback", lastIndexOf(ENGRAVING_CUE, before)],
     ["dial", lastIndexOf(DIAL_CUE, before)],
     ["name", lastIndexOf(NAME_CUE, before)],
+    ["card", lastIndexOf(CARD_CUE, before)],
   ];
   const [nearest, index] = cues.reduce((best, cue) => (cue[1] > best[1] ? cue : best));
   if (index >= 0) return nearest;
@@ -530,6 +540,10 @@ function detectWaterResistance(lower: string): number | undefined {
   return undefined;
 }
 
+function strapTypeForWord(word: string): Strap["type"] | undefined {
+  return STRAP_WORDS.find(([candidate]) => candidate === word)?.[1];
+}
+
 function detectStrapType(tokens: string[]): Strap["type"] | undefined {
   for (const [i, token] of tokens.entries()) {
     const hit = STRAP_WORDS.find(([word]) => word === token);
@@ -599,6 +613,7 @@ function recognisedAnything(intent: Omit<DesignIntent, "recognised">): boolean {
     intent.clearDialText,
     intent.clearEngraving,
     intent.swiss,
+    wantsExtras(intent.extras),
   ];
   const values = [
     intent.style,
@@ -615,6 +630,7 @@ function recognisedAnything(intent: Omit<DesignIntent, "recognised">): boolean {
     intent.dialText,
     intent.casebackEngraving,
     intent.unquotedText,
+    intent.cardMessage,
   ];
   const lists = [intent.rejectedStyles, intent.brands, intent.unsupported, ...Object.values(intent.colors)];
   return flags.some(Boolean) || values.some((value) => value !== undefined) || lists.some((list) => list.length > 0);
@@ -623,7 +639,10 @@ function recognisedAnything(intent: Omit<DesignIntent, "recognised">): boolean {
 export function parseIntent(message: string): DesignIntent {
   const { quotes, rest } = extractTexts(message);
   const lower = rest.toLowerCase();
-  const tokens = tokenize(rest);
+  const allTokens = tokenize(rest);
+  // Words about the extras ("a spare olive NATO", "a travel pouch") say nothing about the watch itself.
+  const extras = parseExtras(allTokens, strapTypeForWord);
+  const tokens = allTokens.map((token, i) => (extras.consumed.has(i) ? "_" : token));
   const joined = tokens.join(" ");
   const negated = negatedWords(rest);
   const { style, rejected: rejectedStyles } = detectStyle(joined, negated);
@@ -719,6 +738,8 @@ export function parseIntent(message: string): DesignIntent {
     unquotedText,
     clearDialText,
     clearEngraving,
+    extras: extras.intent,
+    cardMessage: quoted("card"),
     brands: review.trademarks,
     swiss: review.protectedIndications.length > 0,
     unsupported,

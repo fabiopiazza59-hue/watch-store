@@ -26,9 +26,6 @@ export const EXTRAS_PANEL_ID = "extras";
 /** Focused when an issue brings the panel into view. */
 export const EXTRAS_TITLE_ID = "extras-title";
 
-/** Fixes shown under a problem here; the "Can we build it?" panel lists them all. */
-const PANEL_FIXES = 3;
-
 interface ExtrasPanelProps {
   spec: WatchSpec;
   parts: ResolvedSpec;
@@ -180,7 +177,7 @@ function SpareStrapRow({ option, name, selected, problem, onChoose }: SpareStrap
   return (
     <li>
       <label
-        className={`group flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-1 has-focus-visible:outline-brass-ink ${
+        className={`group flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-1 has-focus-visible:outline-brass-ink ${
           selected ? "border-brass/60 bg-brass-soft" : "border-transparent hover:bg-surface-muted"
         }`}
       >
@@ -208,16 +205,17 @@ function SpareStrapRow({ option, name, selected, problem, onChoose }: SpareStrap
           <SwatchPlaceholder className="size-6" />
         )}
         <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className={`text-sm font-medium ${wontFit ? "text-ink-soft" : "text-ink"}`}>
-              {strap?.name ?? (option.strapId === null ? "No spare strap" : option.strapId)}
-            </span>
-            {option.strapId !== null && <FitBadge fit={fit} />}
+          <span className={`block text-sm font-medium ${wontFit ? "text-ink-soft" : "text-ink"}`}>
+            {strap?.name ?? (option.strapId === null ? "No spare strap" : option.strapId)}
           </span>
-          <span className="mt-0.5 block text-xs text-ink-faint">
-            {strap
-              ? [...partHighlights(strap), ...(option.sameAsWatch ? ["same as on the watch"] : [])].join(" · ")
-              : "Just the strap on the watch"}
+          {/* The badge shares the details line, so a long list of straps stays two lines a strap. */}
+          <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-faint">
+            {option.strapId !== null && <FitBadge fit={fit} />}
+            <span>
+              {strap
+                ? [...partHighlights(strap), ...(option.sameAsWatch ? ["same as on the watch"] : [])].join(" · ")
+                : "Just the strap on the watch"}
+            </span>
           </span>
           {explanation && (
             <span
@@ -340,7 +338,7 @@ function ExtrasProblems({ issues, onApplyFix }: { issues: Issue[]; onApplyFix: (
             </p>
             {issue.fixes.length > 0 && (
               <ul className="mt-2 flex flex-col gap-1.5 pl-6">
-                {issue.fixes.slice(0, PANEL_FIXES).map((fix) => (
+                {issue.fixes.map((fix) => (
                   <li
                     key={fix.description}
                     className="flex items-center justify-between gap-3 rounded-md bg-surface/80 py-1.5 pr-1.5 pl-3"

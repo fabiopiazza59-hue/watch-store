@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SPEC, TEMPLATES } from "@/domain/catalog";
+import { DEFAULT_SPEC, EXTRAS, TEMPLATES } from "@/domain/catalog";
 import { REQUEST_BODY_LIMITS } from "@/domain/schemas";
 import type { Order, WatchSpec } from "@/domain/types";
 import { isOrderConfirmationToken } from "@/server/workshopAuth";
@@ -63,10 +63,11 @@ beforeEach(() => {
 });
 
 describe("GET /api/catalog", () => {
-  it("returns the parts library, slots and templates", async () => {
+  it("returns the parts library, slots, templates and add-ons", async () => {
     const body = await getCatalog().json();
-    expect(Object.keys(body)).toEqual(["catalog", "slots", "templates"]);
+    expect(Object.keys(body)).toEqual(["catalog", "slots", "templates", "extras"]);
     expect(body.catalog.cases.length).toBeGreaterThan(0);
+    expect(body.extras).toEqual(EXTRAS);
   });
 });
 
@@ -77,6 +78,18 @@ describe("POST /api/validate", () => {
     const body = await response.json();
     expect(body.report.buildable).toBe(true);
     expect(body.quote.suggestedRetailEur).toBeGreaterThan(0);
+  });
+
+  it("judges and prices the extras", async () => {
+    const extras = { spareStrapId: "strap-nato-navy-22", itemIds: ["extra-presentation-box"] };
+    const fitting = await (await postValidate(jsonRequest("POST", { spec: { ...DEFAULT_SPEC, extras } }))).json();
+    expect(fitting.report.buildable).toBe(true);
+    expect(fitting.quote.extrasCostEur).toBeGreaterThan(0);
+
+    const narrow = { ...DEFAULT_SPEC, extras: { ...extras, spareStrapId: "strap-nato-olive-20" } };
+    const body = await (await postValidate(jsonRequest("POST", { spec: narrow }))).json();
+    expect(body.report.buildable).toBe(false);
+    expect(body.report.issues[0]).toMatchObject({ ruleId: "spare-strap", severity: "error", slots: [] });
   });
 
   it("rejects bad JSON and malformed specs with a 400 and field messages", async () => {
