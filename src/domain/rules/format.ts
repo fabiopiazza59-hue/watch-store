@@ -39,8 +39,9 @@ export function listJoin(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
+/** Customer wording for a crown position; the 3.8 position reads as "about 4 o'clock". */
 export function crownLabel(position: CrownPosition): string {
-  return position === 3.8 ? "about 4 o'clock (the 3.8 'SKX' position)" : `${position} o'clock`;
+  return position === 3.8 ? "about 4 o'clock" : `${position} o'clock`;
 }
 
 export function dateWindowLabel(window: DateWindow): string {

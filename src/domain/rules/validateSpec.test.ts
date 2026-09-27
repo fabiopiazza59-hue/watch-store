@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Catalog, Issue, MovementFamily, SlotKey, WatchSpec } from "../types";
-import { validateSpec } from ".";
+import { resolveSpec } from "../catalog";
+import { fitDialText } from "../dialTextFit";
+import { normalizePersonalizationText, validateSpec } from ".";
 import { BASE_SPEC, byId, FIELD_SPEC, fixtureCatalog, specWith } from "./__fixtures__/catalog";
 
 function issuesOf(ruleId: string, spec: WatchSpec, catalog: Catalog = fixtureCatalog()): Issue[] {
@@ -99,6 +101,9 @@ describe("dial-crown-position", () => {
     const [issue] = issuesOf("dial-crown-position", specWith({ dialId: "dial-field-cream" }));
     expect(issue).toMatchObject({ severity: "error", slots: ["dialId", "caseId"] });
     expect(issue.message).toContain("crown at 3 o'clock");
+    // The 3.8 position reads as "about 4 o'clock", without collector jargon.
+    expect(issue.message).toContain("crown at about 4 o'clock");
+    expect(issue.message).not.toMatch(/SKX|3\.8/);
   });
 
   it("passes when crown positions match", () => {
@@ -125,6 +130,12 @@ describe("date-window", () => {
     const [issue] = issuesOf("date-window", specWith({ dialId: "dial-diver-black-nodate" }));
     expect(issue.message).toContain("phantom");
     expect(issue.slots).toEqual(["dialId", "movementId"]);
+  });
+
+  it("says a date window on a movement without a date wheel would show bare movement", () => {
+    const [issue] = issuesOf("date-window", specWith({ movementId: "mv-nodate" }));
+    expect(issue.message).toContain("has no date wheel, so the window would open onto bare movement");
+    expect(issue.message).not.toContain("disc");
   });
 });
 
@@ -188,8 +199,12 @@ describe("gmt-hand", () => {
     expect(issue.message).toContain("no GMT hand");
   });
 
-  it("is an error when a GMT hand has no pinion", () => {
-    expect(issuesOf("gmt-hand", specWith({ handsId: "hands-gmt" }))[0].message).toContain("no GMT pinion");
+  it("is an error when a GMT hand has no pinion, explained without jargon and naming the way out", () => {
+    const { message } = issuesOf("gmt-hand", specWith({ handsId: "hands-gmt" }))[0];
+    expect(message).toContain("no fourth (24-hour) hand to fit it to");
+    expect(message).not.toContain("pinion");
+    const gmt = byId(fixtureCatalog().movements, "mv-gmt").caliber;
+    expect(message).toContain(`Choose the ${gmt} GMT movement or hands without a GMT hand.`);
   });
 
   it.each([
@@ -225,11 +240,14 @@ describe("hand-length", () => {
 });
 
 describe("crystal-fit", () => {
+  // Crystals come in 0.1 mm steps, and one step off won't seal.
   it.each([
-    [31.6, false],
-    [31.61, true],
-    [31.4, false],
-    [31.39, true],
+    [31.55, false],
+    [31.56, true],
+    [31.6, true],
+    [31.45, false],
+    [31.44, true],
+    [31.4, true],
   ])("a %f mm crystal in a 31.5 mm seat: error %s", (diameter, isError) => {
     const catalog = fixtureCatalog();
     byId(catalog.crystals, "crystal-sapphire-315").diameterMm = diameter;
@@ -310,19 +328,67 @@ describe("strap-width", () => {
 });
 
 describe("hand-clearance", () => {
-  it.each([
-    [1.59, ["warning"]],
-    [1.6, []],
-  ])("GMT stack with %f mm clearance: %j", (clearance, expected) => {
+  const GMT_WITH_GMT_DIAL = { ...GMT_SPEC, dialId: "dial-gmt-black" };
+
+  /** The fixture catalogue with the diver case sold NH34-ready for `readyWith` and the given GMT hand and crystal. */
+  function gmtCatalog({ readyWith, crystal = "flat", seconds = 13 }: {
+    readyWith?: ("flat" | "domed" | "double-dome")[];
+    crystal?: "flat" | "domed" | "double-dome";
+    seconds?: number;
+  }): Catalog {
     const catalog = fixtureCatalog();
-    byId(catalog.cases, "case-diver").handClearanceMm = clearance;
-    expect(severitiesOf("hand-clearance", GMT_SPEC, catalog)).toEqual(expected);
+    byId(catalog.cases, "case-diver").nh34ReadyCrystals = readyWith;
+    byId(catalog.crystals, "crystal-sapphire-315").shape = crystal;
+    byId(catalog.hands, "hands-gmt").lengthsMm.seconds = seconds;
+    return catalog;
+  }
+
+  describe("tight stack", () => {
+    it.each([
+      [1.59, ["warning"]],
+      [1.6, []],
+    ])("GMT stack with %f mm clearance: %j", (clearance, expected) => {
+      const catalog = gmtCatalog({ readyWith: ["flat"] });
+      byId(catalog.cases, "case-diver").handClearanceMm = clearance;
+      expect(severitiesOf("hand-clearance", GMT_WITH_GMT_DIAL, catalog)).toEqual(expected);
+    });
+
+    it("ignores three-hand movements", () => {
+      const catalog = fixtureCatalog();
+      byId(catalog.cases, "case-diver").handClearanceMm = 1.2;
+      expect(issuesOf("hand-clearance", BASE_SPEC, catalog)).toEqual([]);
+    });
   });
 
-  it("ignores three-hand movements", () => {
-    const catalog = fixtureCatalog();
-    byId(catalog.cases, "case-diver").handClearanceMm = 1.2;
-    expect(issuesOf("hand-clearance", BASE_SPEC, catalog)).toEqual([]);
+  describe("seconds hand against the crystal", () => {
+    it.each<[string, Parameters<typeof gmtCatalog>[0], string[]]>([
+      ["a 13 mm seconds hand under a flat crystal", {}, ["warning"]],
+      ["a 12 mm seconds hand under a flat crystal", { seconds: 12 }, ["warning"]],
+      ["an 11.9 mm seconds hand under a flat crystal", { seconds: 11.9 }, []],
+      ["a 13 mm seconds hand under a single-domed crystal", { crystal: "domed" }, ["warning"]],
+      ["a 13 mm seconds hand under a double-dome", { crystal: "double-dome" }, ["warning"]],
+      ["a 12.5 mm seconds hand under a double-dome", { crystal: "double-dome", seconds: 12.5 }, []],
+      ["a flat crystal in a case sold NH34-ready with it", { readyWith: ["flat"] }, []],
+      ["a flat crystal in a case sold NH34-ready only with a double-dome", { readyWith: ["double-dome"] }, ["warning"]],
+      ["a double-dome in a case sold NH34-ready with it", { readyWith: ["double-dome"], crystal: "double-dome" }, []],
+    ])("%s: %j", (_, setup, expected) => {
+      expect(severitiesOf("hand-clearance", GMT_WITH_GMT_DIAL, gmtCatalog(setup))).toEqual(expected);
+    });
+
+    it("names the seconds hand, the crystal and the limit, and involves all four parts", () => {
+      const [flat] = issuesOf("hand-clearance", GMT_WITH_GMT_DIAL, gmtCatalog({}));
+      expect(flat.message).toContain("The 'GMT Arrow' seconds hand is 13 mm long");
+      expect(flat.message).toContain("isn't sold NH34-ready with the 'Sapphire flat 31.5mm' crystal");
+      expect(flat.message).toContain("shorter than 12 mm unless the crystal is double-domed");
+      expect(flat.slots).toEqual(["crystalId", "handsId", "caseId", "movementId"]);
+
+      const [doubleDome] = issuesOf("hand-clearance", GMT_WITH_GMT_DIAL, gmtCatalog({ crystal: "double-dome" }));
+      expect(doubleDome.message).toContain("even a double-dome crystal only clears a seconds hand up to 12.5 mm");
+    });
+
+    it("ignores three-hand movements", () => {
+      expect(issuesOf("hand-clearance", BASE_SPEC, gmtCatalog({}))).toEqual([]);
+    });
   });
 });
 
@@ -340,13 +406,58 @@ describe("dial-text", () => {
   });
 
   it.each([
-    ["20 characters is fine", "x".repeat(20), false],
+    ["20 characters is within the limit", "x".repeat(20), false],
     ["21 characters", "x".repeat(21), true],
     ["a disallowed character", "Hello!", true],
     ["a brand", "R O L E X", true],
     ["a Swiss indication", "Swiss Made", true],
   ])("%s", (_case, text, isError) => {
-    expect(severitiesOf("dial-text", withText(text))).toEqual(isError ? ["error"] : []);
+    const errors = severitiesOf("dial-text", withText(text)).filter((severity) => severity === "error");
+    expect(errors).toEqual(isError ? ["error"] : []);
+  });
+
+  describe("too long to print legibly", () => {
+    const capacity = (spec: WatchSpec) => {
+      const { dial, case: watchCase } = resolveSpec(spec, fixtureCatalog());
+      return fitDialText(dial!, watchCase!.chapterRing, "x").maxLegibleCharacters;
+    };
+
+    it("warns once the line only fits below the smallest legible size, saying how much fits", () => {
+      const room = capacity(BASE_SPEC);
+      expect(room).toBeGreaterThan(10);
+      expect(room).toBeLessThan(20);
+      expect(issuesOf("dial-text", withText("x".repeat(room)))).toEqual([]);
+
+      const [issue] = issuesOf("dial-text", withText("x".repeat(room + 1)));
+      expect(issue).toMatchObject({ ruleId: "dial-text", severity: "warning", slots: ["dialId"] });
+      expect(issue.message).toContain(`about ${room} characters fit`);
+      expect(issue.fixes.map((fix) => fix.description)).toContain("Remove the dial text");
+    });
+
+    it("measures between the markers the preview draws: arabic numerals leave less room than printed batons", () => {
+      expect(capacity(FIELD_SPEC)).toBeLessThan(capacity(BASE_SPEC));
+      const text = "x".repeat(capacity(FIELD_SPEC) + 1);
+      expect(severitiesOf("dial-text", specWith({}, { dialText: text }))).toEqual([]);
+      expect(severitiesOf("dial-text", { ...FIELD_SPEC, personalization: { dialText: text, casebackEngraving: "" } })).toEqual([
+        "warning",
+      ]);
+    });
+
+    it("leaves over-long text and unprintable dials to their errors", () => {
+      expect(severitiesOf("dial-text", withText("x".repeat(21)))).toEqual(["error"]);
+      expect(severitiesOf("dial-text", withText("x".repeat(20), { dialId: "dial-diver-blue" }))).toEqual(["error"]);
+    });
+  });
+
+  it("accepts a typographic apostrophe once the text is normalised, and refuses fullwidth brand names", () => {
+    expect(severitiesOf("dial-text", withText("Grandpa’s watch"))).toEqual(["error"]);
+    expect(issuesOf("dial-text", withText(normalizePersonalizationText("Grandpa’s watch")))).toEqual([]);
+    const fullwidth = issuesOf("caseback-engraving", specWith({}, { casebackEngraving: "ＲＯＬＥＸ Ｓｗｉｓｓ Ｍａｄｅ" }));
+    expect(fullwidth.map((issue) => issue.message)).toEqual([
+      expect.stringContaining("but not"),
+      expect.stringContaining("'Rolex' is another watch company's trademark"),
+      expect.stringContaining("'Swiss' is a protected indication"),
+    ]);
   });
 
   it("explains each problem with the wording, without blaming a part", () => {

@@ -11,7 +11,8 @@ const DATE_WINDOW_LABELS: Record<DateWindow, string> = {
   "day-date-3": "day-date at 3",
 };
 
-const CROWN_LABELS: Record<CrownPosition, string> = { 3: "3", 3.8: "3.8 (SKX)", 4: "4" };
+/** In plain clock terms: 3.8 is the slightly-off-4 position crown makers use for dive cases. */
+const CROWN_LABELS: Record<CrownPosition, string> = { 3: "3 o'clock", 3.8: "about 4 o'clock", 4: "4 o'clock" };
 
 const INSERT_SCALE_LABELS: Record<BezelInsert["scale"], string> = {
   "dive-60": "60-minute dive scale",
@@ -23,6 +24,11 @@ const INSERT_SCALE_LABELS: Record<BezelInsert["scale"], string> = {
 const AR_LABELS = { none: "no AR coating", inner: "AR inside", both: "AR both sides" } as const;
 
 /** The handful of facts that tell parts of one kind apart, e.g. ["42 mm", "22 mm lugs", "200 m"]. */
+/** "200 m", or "50 m (to be confirmed)" while the case maker hasn't confirmed the rating. */
+export function waterResistanceLabel(watchCase: Pick<WatchCase, "waterResistanceM" | "waterResistanceEstimated">): string {
+  return `${watchCase.waterResistanceM} m${watchCase.waterResistanceEstimated ? " (to be confirmed)" : ""}`;
+}
+
 export function partHighlights(part: Part): string[] {
   switch (part.category) {
     case "movement":
@@ -40,7 +46,7 @@ export function partHighlights(part: Part): string[] {
         `${formatMm(part.lugToLugMm)} lug to lug`,
         `${formatMm(part.thicknessMm)} thick`,
         `${formatMm(part.lugWidthMm)} lugs`,
-        `${part.waterResistanceM} m`,
+        waterResistanceLabel(part),
       ];
     case "dial":
       return [

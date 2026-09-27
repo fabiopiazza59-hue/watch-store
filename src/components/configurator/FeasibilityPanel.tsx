@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import { getSlotDef } from "@/domain/catalog";
-import { repairSpec } from "@/domain/rules";
-import type { Issue, Severity, SlotKey, SuggestedFix, ValidationReport, WatchSpec } from "@/domain/types";
+import type { Issue, RepairResult, Severity, SlotKey, SuggestedFix, ValidationReport, WatchSpec } from "@/domain/types";
 import { plural } from "../ui/format";
-import { AlertIcon, CheckIcon, CrossIcon, InfoIcon, SparkIcon } from "../ui/icons";
+import { AlertIcon, CheckIcon, CrossIcon, InfoIcon, SparkIcon, UndoIcon } from "../ui/icons";
 import { buttonClass, cardClass } from "../ui/styles";
 
 const SEVERITY_GROUPS: { severity: Severity; title: string; blurb: string }[] = [
@@ -34,17 +33,35 @@ interface Notice {
   lines: string[];
 }
 
+/** What "Fix everything" did: the repair, and the part it kept for the customer, if any. */
+export interface RepairOutcome {
+  result: RepairResult;
+  /** "Field Olive dial" when the part the customer chose last was kept. */
+  keptPart: string | null;
+}
+
 interface FeasibilityPanelProps {
   spec: WatchSpec;
   report: ValidationReport;
   /** A small edit, such as one applied fix. */
   onChange: (next: WatchSpec) => void;
-  /** A sweeping change the customer may want to undo. */
-  onReplace: (next: WatchSpec, label: string) => void;
+  /** Repairs the whole design, keeping the part chosen last where it can; the customer can undo it. */
+  onRepair: () => RepairOutcome;
+  /** The design an Undo would take back, if any. */
+  undoableSpec: WatchSpec | null;
+  onUndo: () => void;
   onRevealSlot: (slot: SlotKey) => void;
 }
 
-export function FeasibilityPanel({ spec, report, onChange, onReplace, onRevealSlot }: FeasibilityPanelProps) {
+export function FeasibilityPanel({
+  spec,
+  report,
+  onChange,
+  onRepair,
+  undoableSpec,
+  onUndo,
+  onRevealSlot,
+}: FeasibilityPanelProps) {
   const [notice, setNotice] = useState<Notice | null>(null);
   const errors = report.issues.filter((issue) => issue.severity === "error");
   const warnings = report.issues.filter((issue) => issue.severity === "warning");
@@ -58,12 +75,12 @@ export function FeasibilityPanel({ spec, report, onChange, onReplace, onRevealSl
   }
 
   function repairEverything() {
-    const result = repairSpec(spec);
-    onReplace(result.spec, "Applied automatic fixes.");
+    const { result, keptPart } = onRepair();
+    const kept = keptPart ? `, and your ${keptPart} stays` : "";
     setNotice({
       spec: result.spec,
       title: result.report.buildable
-        ? "Done: it can be built now. Here's what changed:"
+        ? `Done: it can be built now${kept}. Here's what changed:`
         : "I fixed what I could. The rest needs your call:",
       lines: result.changes.length > 0 ? result.changes : ["No automatic fix applied to what's left."],
     });
@@ -75,7 +92,10 @@ export function FeasibilityPanel({ spec, report, onChange, onReplace, onRevealSl
         <h2 id="feasibility-title" className="font-display text-xl font-semibold text-ink">
           Can we build it?
         </h2>
-        <Link href="/how-it-works" className="text-xs text-ink-faint underline decoration-line-strong underline-offset-4 hover:text-ink">
+        <Link
+          href="/how-it-works"
+          className="inline-block py-1.5 text-xs text-ink-faint underline decoration-line-strong underline-offset-4 hover:text-ink"
+        >
           Checked by our rules engine, not the AI
         </Link>
       </div>
@@ -98,6 +118,12 @@ export function FeasibilityPanel({ spec, report, onChange, onReplace, onRevealSl
                 <li key={index}>{line}</li>
               ))}
             </ul>
+            {undoableSpec === visibleNotice.spec && (
+              <button type="button" onClick={onUndo} className={`${buttonClass("secondary", "sm")} mt-3`}>
+                <UndoIcon />
+                Undo these changes
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -194,7 +220,7 @@ function IssueItem({ issue, onApplyFix, onRevealSlot }: IssueItemProps) {
                 key={slot}
                 type="button"
                 onClick={() => onRevealSlot(slot)}
-                className="rounded-full border border-line-strong bg-surface px-2 py-0.5 text-ink-soft hover:border-ink/40 hover:text-ink"
+                className="min-h-8 rounded-full border border-line-strong bg-surface px-3 py-0.5 text-ink-soft hover:border-ink/40 hover:text-ink sm:min-h-0 sm:px-2"
               >
                 {getSlotDef(slot).label}
               </button>

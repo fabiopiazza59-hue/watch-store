@@ -90,9 +90,24 @@ export interface WatchCase extends PartBase {
   /** Chapter ring (rehaut) present. */
   chapterRing: boolean;
   caseback: "solid" | "display";
+  /**
+   * The case maker's rating. When its figures disagree, the lowest; when it publishes none, a
+   * conservative 50 m (both flagged with `waterResistanceEstimated`).
+   */
   waterResistanceM: number;
+  /**
+   * True while the maker hasn't confirmed `waterResistanceM` in writing (no published figure, or
+   * figures that disagree). Show the rating as unconfirmed and never pressure-test above it.
+   */
+  waterResistanceEstimated?: boolean;
   /** Clearance available above the dial for the hand stack, mm (approximation). */
   handClearanceMm: number;
+  /**
+   * Crystal shapes the case maker sells this case NH34-ready with: an NH34's taller hand stack, full-length
+   * seconds hand included, clears them. Without an entry the case is treated as made for three-hand
+   * movements, where a long seconds hand can brush the crystal (see the `hand-clearance` rule).
+   */
+  nh34ReadyCrystals?: Crystal["shape"][];
 }
 
 export interface Dial extends PartBase {
@@ -312,9 +327,20 @@ export interface PriceQuote {
   labourCostEur: number;
   overheadCostEur: number;
   totalCostEur: number;
-  /** Suggested customer price incl. margin (VAT excluded). */
+  /** The workshop's price excluding VAT: `retailInclVatEur` less VAT. Margin is earned on this. */
   suggestedRetailEur: number;
+  /** VAT rate included in `retailInclVatEur`, percent (0 for a VAT-exempt business). */
+  vatRatePct: number;
+  vatEur: number;
+  /** The price a customer is shown and pays, VAT included, rounded to a price ending in 9. */
+  retailInclVatEur: number;
+  /** Gross margin on `suggestedRetailEur`, after every cost including the payment fee. */
   marginPct: number;
+  /**
+   * Set only on quotes read back from orders placed before VAT was itemised: their price was quoted
+   * excluding VAT (VAT fields read as 0), so it is shown as "excl. VAT", not "no VAT charged".
+   */
+  quotedExclVat?: true;
   /** Days until shipment: slowest part lead time + bench time + QC. */
   leadTimeDays: number;
 }
@@ -381,6 +407,11 @@ export interface Order {
   customer: Customer;
   notes: string;
   spec: WatchSpec;
+  /**
+   * The parts as the catalogue described them when the order was placed, so the order still shows
+   * what was ordered after the catalogue changes. Absent on orders placed before it was stored.
+   */
+  parts?: ResolvedSpec;
   quote: PriceQuote;
   buildSheet: BuildSheet;
 }

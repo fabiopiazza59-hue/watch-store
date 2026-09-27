@@ -1,14 +1,19 @@
+import { randomBytes } from "node:crypto";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SPEC } from "@/domain/catalog";
+import { DEFAULT_SPEC, resolveSpec } from "@/domain/catalog";
 import { validateSpec } from "@/domain/rules";
 import type { ValidationReport } from "@/domain/types";
+import type { Order } from "@/domain/types";
 import {
+  CorruptOrderError,
   createOrder,
   getOrder,
-  listOrders,
+  listOrderPage,
+  listOrderSummaries,
+  OrderCapacityError,
   OrderInputError,
   UnbuildableSpecError,
   updateOrderStatus,
@@ -16,7 +21,27 @@ import {
 } from "./orders";
 
 // The rules engine has its own tests; here it only has to say yes or no.
-vi.mock("@/domain/rules", () => ({ validateSpec: vi.fn(() => ({ buildable: true, issues: [] })) }));
+vi.mock("@/domain/rules", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/domain/rules")>()),
+  validateSpec: vi.fn(() => ({ buildable: true, issues: [] })),
+}));
+// Real randomness unless a test scripts the id suffix.
+vi.mock("node:crypto", async (importOriginal) => {
+  const crypto = await importOriginal<typeof import("node:crypto")>();
+  return { ...crypto, randomBytes: vi.fn(crypto.randomBytes) };
+});
+
+/** The first page of orders, newest first. */
+async function listOrders() {
+  return (await listOrderPage()).orders;
+}
+
+/** Makes the next id draws use these suffixes (16 hex digits each). */
+function scriptIdSuffixes(...suffixes: string[]) {
+  for (const suffix of suffixes) {
+    vi.mocked(randomBytes).mockImplementationOnce(() => Buffer.from(suffix, "hex"));
+  }
+}
 
 const INPUT: CreateOrderInput = {
   spec: DEFAULT_SPEC,
@@ -28,6 +53,7 @@ let dir: string;
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  vi.mocked(randomBytes).mockReset();
   dir = await mkdtemp(path.join(tmpdir(), "orders-test-"));
   vi.stubEnv("ORDERS_DIR", path.join(dir, "orders"));
 });
@@ -46,7 +72,7 @@ describe("createOrder", () => {
 
     const order = await createOrder(INPUT);
 
-    expect(order.id).toMatch(/^ORD-20260927-[0-9A-F]{4}$/);
+    expect(order.id).toMatch(/^ORD-20260927-[0-9A-F]{16}$/);
     expect(order).toMatchObject({
       createdAt: "2026-09-27T10:00:00.000Z",
       status: "received",
@@ -80,6 +106,13 @@ describe("createOrder", () => {
     ["an over-long name", { customer: { name: "A".repeat(101), email: "ada@example.com" } }, ["name"]],
     ["an email without a domain", { customer: { name: "Ada", email: "ada@example" } }, ["email"]],
     ["notes over 1000 characters", { notes: "x".repeat(1001) }, ["notes"]],
+    [
+      "an email that would add recipients to a mailto: link",
+      { customer: { name: "Ada", email: "victim@b.cc?cc=attacker%40evil.example&subject=x" } },
+      ["email"],
+    ],
+    ["an email with a fragment", { customer: { name: "Ada", email: "a@b.cc#frag" } }, ["email"]],
+    ["an email with a path", { customer: { name: "Ada", email: "a@b.cc/x" } }, ["email"]],
   ])("rejects %s with a message per field", async (_, changes, fields) => {
     const attempt = createOrder({ ...INPUT, ...changes });
     await expect(attempt).rejects.toBeInstanceOf(OrderInputError);
@@ -91,6 +124,35 @@ describe("createOrder", () => {
   it("accepts a missing notes field and the limits themselves", async () => {
     const order = await createOrder({ spec: DEFAULT_SPEC, customer: { name: "A".repeat(100), email: "a@b.io" } });
     expect(order.notes).toBe("");
+  });
+
+  it.each(["o'brien@example.ie", "a+tag@example.com"])("accepts the ordinary address %s", async (email) => {
+    const order = await createOrder({ ...INPUT, customer: { name: "Ada", email } });
+    expect(order.customer.email).toBe(email);
+  });
+
+  it("stores texts typed with smart punctuation in plain ASCII, and judges them that way", async () => {
+    const spec = { ...DEFAULT_SPEC, personalization: { dialText: "Grandpa’s watch", casebackEngraving: "1953 – 2026" } };
+    const order = await createOrder({ ...INPUT, spec });
+    const plain = { dialText: "Grandpa's watch", casebackEngraving: "1953 - 2026" };
+    expect(order.spec.personalization).toEqual(plain);
+    expect(vi.mocked(validateSpec).mock.calls[0][0].personalization).toEqual(plain);
+    expect((await getOrder(order.id))?.spec.personalization).toEqual(plain);
+  });
+
+  it("keeps a copy of the parts as ordered, which outlives the catalogue entry", async () => {
+    const order = await createOrder(INPUT);
+    expect(order.parts).toEqual(resolveSpec(DEFAULT_SPEC));
+
+    // Later the dial is retired from the catalogue: the order still says what was ordered.
+    const file = path.join(dir, "orders", `${order.id}.json`);
+    const stored = JSON.parse(await readFile(file, "utf8")) as Order;
+    const retired = { ...stored.parts!.dial!, id: "dial-retired", name: "Retired dial" };
+    await writeFile(file, JSON.stringify({ ...stored, spec: { ...stored.spec, dialId: "dial-retired" }, parts: { ...stored.parts, dial: retired } }));
+
+    const read = await getOrder(order.id);
+    expect(resolveSpec(read!.spec).dial).toBeUndefined();
+    expect(read?.parts?.dial).toEqual(retired);
   });
 });
 
@@ -134,6 +196,105 @@ describe("reading orders", () => {
 
     expect((await listOrders()).map((listed) => listed.id)).toEqual([order.id]);
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it.each<[string, (order: Order) => unknown]>([
+    ["a null spec", (order) => ({ ...order, spec: null })],
+    ["an empty spec", (order) => ({ ...order, spec: {} })],
+    ["a null customer", (order) => ({ ...order, customer: null })],
+    ["an unreadable date", (order) => ({ ...order, createdAt: "yesterday" })],
+    ["an empty quote", (order) => ({ ...order, quote: {} })],
+    ["an empty build sheet", (order) => ({ ...order, buildSheet: {} })],
+  ])("treats a file with %s as damaged: skipped in lists, an error when opened", async (_, damage) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const order = await createOrder(INPUT);
+    const id = "ORD-20260101-AAAA";
+    await writeFile(path.join(dir, "orders", `${id}.json`), JSON.stringify(damage({ ...order, id })));
+
+    expect((await listOrders()).map((listed) => listed.id)).toEqual([order.id]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    await expect(getOrder(id)).rejects.toBeInstanceOf(CorruptOrderError);
+    await expect(getOrder(id)).rejects.toMatchObject({ orderId: id });
+    await expect(updateOrderStatus(id, "shipped")).rejects.toBeInstanceOf(CorruptOrderError);
+  });
+
+  it("still reads orders saved with the older, 4-digit ids", async () => {
+    const order = await createOrder(INPUT);
+    const old = { ...order, id: "ORD-20260101-7F3A" };
+    await writeFile(path.join(dir, "orders", `${old.id}.json`), JSON.stringify(old));
+    expect(await getOrder(old.id)).toEqual(old);
+  });
+});
+
+describe("paging through orders", () => {
+  async function seedOrders(count: number): Promise<string[]> {
+    const template = await createOrder(INPUT);
+    await rm(path.join(dir, "orders", `${template.id}.json`));
+    const ids = Array.from({ length: count }, (_, i) => `ORD-2026${String(Math.floor(i / 28) + 1).padStart(2, "0")}${String((i % 28) + 1).padStart(2, "0")}-${i.toString(16).toUpperCase().padStart(16, "0")}`);
+    await Promise.all(
+      ids.map((id, i) =>
+        writeFile(
+          path.join(dir, "orders", `${id}.json`),
+          JSON.stringify({ ...template, id, createdAt: new Date(Date.UTC(2026, 0, 1) + i * 60_000).toISOString() }),
+        ),
+      ),
+    );
+    return ids;
+  }
+
+  it("lists at most a page of the newest orders, with a cursor for the rest", async () => {
+    const ids = await seedOrders(150);
+    const newestFirst = [...ids].reverse();
+
+    const first = await listOrderPage();
+    expect(first.orders.map((order) => order.id)).toEqual(newestFirst.slice(0, 100));
+    expect(first.nextBefore).toBe(newestFirst[99]);
+
+    const second = await listOrderPage({ before: first.nextBefore ?? undefined });
+    expect(second.orders.map((order) => order.id)).toEqual(newestFirst.slice(100));
+    expect(second.nextBefore).toBeNull();
+    expect((await listOrderPage({ limit: 1000 })).orders).toHaveLength(100);
+  });
+
+  it("summarises orders without their spec, quote or build sheet", async () => {
+    await seedOrders(3);
+    const { orders, nextBefore } = await listOrderSummaries({ limit: 2 });
+    expect(orders).toHaveLength(2);
+    expect(nextBefore).not.toBeNull();
+    expect(Object.keys(orders[0]).sort()).toEqual(["createdAt", "customer", "designName", "id", "retailInclVatEur", "status"]);
+    expect(orders[0]).toMatchObject({ designName: DEFAULT_SPEC.name, customer: { name: "Ada Lovelace" } });
+  });
+});
+
+describe("order ids", () => {
+  it("never overwrites an order that already has the id drawn, even when created at the same moment", async () => {
+    scriptIdSuffixes("00000000000000AB", "00000000000000AB", "00000000000000CD");
+    const [alice, bob] = await Promise.all([
+      createOrder({ ...INPUT, customer: { name: "Alice", email: "alice@example.com" } }),
+      createOrder({ ...INPUT, customer: { name: "Bob", email: "bob@example.com" } }),
+    ]);
+    expect(alice.id).not.toBe(bob.id);
+    expect((await readdir(path.join(dir, "orders"))).sort()).toEqual([`${alice.id}.json`, `${bob.id}.json`].sort());
+    expect((await getOrder(alice.id))?.customer.name).toBe("Alice");
+    expect((await getOrder(bob.id))?.customer.name).toBe("Bob");
+  });
+
+  it("gives up after a few draws instead of spinning when every id it draws is taken", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-27T10:00:00Z"));
+    const taken = await createOrder(INPUT);
+    vi.mocked(randomBytes).mockImplementation(() => Buffer.from(taken.id.slice(-16), "hex"));
+
+    await expect(createOrder(INPUT)).rejects.toThrow(/unused order id/);
+    expect(await readdir(path.join(dir, "orders"))).toEqual([`${taken.id}.json`]);
+  });
+
+  it("stops taking orders for the day at ORDERS_DAILY_LIMIT", async () => {
+    vi.stubEnv("ORDERS_DAILY_LIMIT", "2");
+    await createOrder(INPUT);
+    await createOrder(INPUT);
+    await expect(createOrder(INPUT)).rejects.toBeInstanceOf(OrderCapacityError);
+    expect(await readdir(path.join(dir, "orders"))).toHaveLength(2);
   });
 });
 

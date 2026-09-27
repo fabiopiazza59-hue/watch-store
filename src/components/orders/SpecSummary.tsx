@@ -1,11 +1,18 @@
 import { resolveSpec, SLOTS } from "@/domain/catalog";
-import type { WatchSpec } from "@/domain/types";
+import type { ResolvedSpec, SlotKey, WatchSpec } from "@/domain/types";
 import { partHighlights, partSwatch } from "../parts/partInfo";
 import { PartSwatch, SwatchPlaceholder } from "../parts/PartSwatch";
 
+interface SpecSummaryProps {
+  spec: WatchSpec;
+  /** The parts to show; by default, today's catalogue entries for the spec's ids. */
+  parts?: ResolvedSpec;
+  /** Names to show for parts `parts` lacks, such as an ordered part the catalogue no longer lists. */
+  orderedNames?: Partial<Record<SlotKey, string>>;
+}
+
 /** Every part of a design, one line per slot, plus any personalization. */
-export function SpecSummary({ spec }: { spec: WatchSpec }) {
-  const parts = resolveSpec(spec);
+export function SpecSummary({ spec, parts = resolveSpec(spec), orderedNames = {} }: SpecSummaryProps) {
   const { dialText, casebackEngraving } = spec.personalization;
   const personalization = [
     { label: "Dial text", value: dialText.trim() },
@@ -28,7 +35,7 @@ export function SpecSummary({ spec }: { spec: WatchSpec }) {
               )}
               <span className="min-w-0">
                 <span className="text-sm font-medium text-ink">
-                  {part?.name ?? (def.optional ? "None" : "Missing part")}
+                  {part?.name ?? orderedNames[def.slot] ?? (def.optional && !spec[def.slot] ? "None" : "Missing part")}
                 </span>
                 {part && <span className="block text-xs text-ink-faint">{partHighlights(part).join(" · ")}</span>}
               </span>

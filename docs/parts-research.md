@@ -46,22 +46,40 @@ movement carries Seiko's figures and the hands carry the sellers' figures. The r
   are not stocked here. *Verified (seller listing; forum discussions agree).*
 - **NH36A day wheel.** The day wheel is pre-aligned for one crown position. Sellers stock a standard
   version (3 o'clock crown) and a "4 o'clock crown" version. Order the one that matches the case,
-  or the day text reads crooked. *Verified.* The catalogue does not model this yet (see §5), so
-  the NH36A `supplierHint` says it instead.
+  or the day text reads crooked. *Verified* (SII's NH3 technical guide lists the day star by crown
+  position). The build sheet's parts list names the day wheel for the chosen case, and the black or
+  white date wheel that suits the dial (the same rule the preview draws with).
+- **Quick-set windows.** SII's NH3 technical guide: don't set the date between 9 p.m. and 4 a.m. on
+  the NH35/NH36, or the calendar can malfunction. The NH34 isn't in that guide; Seiko's NH34
+  instructions say not to change the date *or the GMT hand* between 9 p.m. and 3 a.m. The build sheet
+  uses these windows and does every quick-set test at about 6 o'clock. *Verified.*
+- **Timing conditions.** SII measures a movement fully wound (at least 55 turns of the crown), 10-60
+  minutes after winding, dial up, 9 o'clock up and 6 o'clock up, and allows a posture difference of
+  under 60 s/day between them. The build sheet's baseline, regulation and QC use those conditions.
+  *Verified.*
 - **NH34A is a "caller" GMT.** Crown position 1 sets the date one way and moves the 24h hand in
   one-hour jumps the other way. The local hour hand is not independently settable. *Verified.*
 - **NH34A needs a GMT dial.** The 24h pinion needs a dial centre hole of about 2.7-2.9 mm. Standard
   NH35 dials are about 2.05 mm and would have to be broached. Every GMT dial in the catalogue is
   sold NH34-ready. *Verified.* The rules engine checks this with `dial-center-hole` (`Dial.centerHoleMm`).
-- **NH34A hand stack.** The stack is 0.4 mm taller, so in slim cases the seconds hand can touch the
-  crystal. One case maker says the seconds hand must be under 12 mm, or use a seconds-hand cap.
-  The `hand-clearance` warning covers this. *Verified.*
+- **NH34A hand stack.** The stack is 0.4 mm taller, so the seconds hand can touch the crystal in a
+  case made for three-hand movements. One case maker says the seconds hand must be under 12 mm, or
+  use a seconds-hand cap. Lucius Atelier's table for an NH34 in a three-hand case: a flat crystal
+  clears none of 12.0, 12.5 or 12.75 mm seconds hands; a double-dome clears 12.0 and 12.5 mm but not
+  12.75 mm. *Verified.* The `hand-clearance` rule warns about exactly this (flat or single-domed
+  crystal with a seconds hand of 12 mm or more, double-dome with one over 12.5 mm) unless the case
+  maker sells the case NH34-ready with that crystal shape (`nh34ReadyCrystals`): the Dress 39's
+  reference case is sold "NH34-Ready" with its double-dome, and the Travel GMT 40's cited maker lists
+  NH34 compatibility with its flat sapphire. That second listing is a generic compatibility list, the
+  kind the same maker also gives its dive cases (which are not marked), so check the seconds hand
+  against the crystal on the first Travel GMT build. Both GMT hand sets stocked have 13 mm seconds
+  hands. Separately, cases with an estimated hand clearance under 1.6 mm get a "tight stack" warning.
 - **NH38A is a true no-date.** It has no date wheel, so the crown has no dead "phantom date"
   position. The main plate is open at 9 o'clock so an *open-heart* dial can show the balance; with a
   solid dial the opening is hidden. *Verified.* Open-heart dials are not stocked yet, because the
   rules cannot tell that they only make sense on an NH38 (see §5).
 - **Stems.** The NH stem (Seiko part 351-200, tap 10) must be cut to length for each case. Budget
-  a spare stem per build while learning. *Verified.*
+  a spare stem per build while learning; pricing counts it under consumables. *Verified.*
 
 ## 2. The aftermarket parts ecosystem
 
@@ -87,7 +105,10 @@ movement carries Seiko's figures and the hands carry the sellers' figures. The r
 | 39 mm wide-dial pilot and titanium field | **34.5 mm** | Estimate |
 
 Crystals cost about €18-25 for flat sapphire and €30-45 for double-dome. Mineral crystals cost
-under €10. Case makers usually ship the case with the crystal fitted.
+under €10. Case makers usually ship the case with the crystal fitted. Crystals are sold in 0.1 mm
+steps and one step off won't seal, so the `crystal-fit` rule only accepts the seat's own size.
+A domed or double-dome crystal is pressed with a hollow (ring) die that bears on its edge, never on
+the dome (Esslinger's guide); the build sheet says so and adds the die to the tools.
 
 ### Bezel inserts
 | Pattern | Outer × inner | Confidence |
@@ -123,16 +144,19 @@ they are never used in part names.
 |---|---|---|---|
 | Classic Diver 42 | SKX-style aftermarket case | 42 mm, 46 mm lug-to-lug, 22 mm lugs, 3.8 crown, 28.5 dial, 31.5 crystal, 38 × 30.6 insert, 200 m | Verified |
 | Black Sport 42 | Same pattern, PVD, fixed bezel | As above, fixed bezel | Single source (bezel variant) |
-| Compact Diver 39 | 39 mm vintage-diver pattern | 20 mm lugs, 3 crown, 28.5 dial, 36.5 × 30.5 insert; WR listed from 50 to 200 m | Single source + estimates |
+| Compact Diver 39 | 39 mm vintage-diver pattern | 20 mm lugs, 3 crown, 28.5 dial, 36.5 × 30.5 insert; the maker's spec says 5 ATM / 50 m and its title 10 ATM, so 50 m is used | Single source + estimates; WR unconfirmed |
 | Field 38 | 36/39 mm field pattern | 20 mm lugs, 28.5 dial, 29.5 × 1.5 flat sapphire, 100 m | Interpolated |
 | Dress 39 Exhibition | "GS-style" 39 mm | 20 mm lugs, 28.5 dial, 29.5 double-dome sapphire, display back; WR set conservatively to 50 m | Verified dimensions, WR estimate |
-| Pilot 39 | 39 mm vintage-pilot pattern | 48.5 mm lug-to-lug, 12.7 mm thick, 20 mm lugs, 33.5 dial | Verified dimensions; crystal and WR estimated |
-| Travel GMT 40 | 40 mm dive/GMT pattern with bidirectional bezel | 20 mm lugs, 28.5 dial, 38 × 30.6 insert, 200 m | Verified, crystal estimated |
+| Pilot 39 | 39 mm vintage-pilot pattern | 48.5 mm lug-to-lug, 12.7 mm thick, 20 mm lugs, 33.5 dial; no WR published, 50 m used | Verified dimensions; crystal estimated, WR unconfirmed |
+| Travel GMT 40 | 40 mm dive/GMT pattern with bidirectional bezel | 20 mm lugs, 28.5 dial, 38 × 30.6 insert, 200 m, maker lists NH34 | Estimate (bezel action and crystal): the cited 40 mm case has a one-way 120-click bezel |
 | Titanium Field 39 | Ti-2 pilot/field pattern | 48.6 mm lug-to-lug, 12 mm thick, 20 mm lugs, 33-34 dial, 200 m | Verified, crystal estimated |
 | Bronze Diver 40 | CuSn8 40 mm dive pattern | 47.2 mm lug-to-lug, 13.5 mm thick, 20 mm lugs, 3 crown, 38 × 30.6 insert, 200 m | Verified, crystal estimated |
 
 - **Water resistance:** a display caseback often drops the rating (for example, 200 m solid vs 100 m
-  glass on the same case). Always quote the rating of the exact variant you order.
+  glass on the same case). Always quote the rating of the exact variant you order. Where a maker
+  publishes no rating, or its figures disagree, the catalogue uses the lowest published figure (or a
+  conservative 50 m) and sets `waterResistanceEstimated`, so the rating can be shown as unconfirmed
+  and the build sheet never pressure-tests above it. A pressure test below the rating is not a pass.
 - **Hand clearance** (`handClearanceMm`) is an estimate for every case. No maker publishes it.
   Thin cases (Field 38, Black Sport 42) are set below 1.6 mm, so an NH34 there gets the "tight
   stack" warning.
@@ -173,13 +197,18 @@ will show your real costs; then update `costEur`.
 
 1. **Crystal seats marked "Estimate"** (30.0, 30.5 and 34.5 mm cases): ask for the drawing or
    measure the fitted crystal. A 0.1 mm error means a crystal that won't seal.
-2. **Compact Diver 39:** insert size (36.5 × 30.5?) and water-resistance rating.
-3. **Dress 39 Exhibition:** the water-resistance rating of the display-back, push-pull crown
-   variant.
-4. **Wide-dial hands** (`hands-syringe-white-large`, `hands-sword-black-large`): the real lengths.
-5. **NH36 builds in 3.8-crown cases:** order the "4 o'clock crown" day-wheel version.
-6. **Hand clearance:** measure dial-to-crystal height in each case during the first build and
-   replace the estimates.
+2. **Compact Diver 39:** insert size (36.5 × 30.5?) and the water-resistance rating in writing. The
+   cited page's spec says 5 ATM / 50 m while its title says 10 ATM; 50 m is used until then.
+3. **Dress 39 Exhibition and Pilot 39:** the water-resistance rating of the exact variant (the
+   display-back, push-pull Dress 39; the Pilot 39 has no published rating). Both use 50 m until then.
+4. **Travel GMT 40:** a 40 mm NH34 case with a bidirectional 24-click bezel, its insert, crystal and
+   rating. The 40 mm case cited so far has a one-way 120-click bezel, which would make the Travel GMT
+   template's bezel promise (and its QC check) wrong.
+5. **Wide-dial hands** (`hands-syringe-white-large`, `hands-sword-black-large`): the real lengths.
+6. **NH36 builds in 3.8-crown cases:** order the "4 o'clock crown" day-wheel version (the build
+   sheet's parts list says which).
+7. **Hand clearance:** measure dial-to-crystal height in each case during the first build and
+   replace the estimates. On the first NH34 build, check the 13 mm seconds hand against the crystal.
 
 ## 5. Real constraints the catalogue/rules cannot express yet
 
@@ -187,7 +216,8 @@ These are proposed as contract changes. Until then, `dataNotes` and `supplierHin
 (The dial centre hole, once listed here, is now modelled as `Dial.centerHoleMm` and checked by
 the `dial-center-hole` rule.)
 
-- **Movement day-wheel variant per crown position** (NH36).
+- **Movement day-wheel variant per crown position** (NH36). The build sheet works it out from the
+  case, but the order doesn't record it as data.
 - **Dials with feet for several crown positions** (a list instead of a single `crownPosition`).
 - **Dial aperture** (open-heart at 9 o'clock), which only makes sense with the NH38.
 - **Separate chapter rings.** Some premium cases need an SKX013-spec chapter ring bought separately.
@@ -205,6 +235,9 @@ Movements
 - Lucius Atelier, Seiko 5 GMT / NH34 compatibility: https://luciusatelier.com/blogs/news/compatibility-breakdown-of-seiko-5-gmt-series-nh34-movement
 - Lucius Atelier, movements and prices: https://luciusatelier.com/collections/watch-movements
 - Nomods, NH38 guide: https://nomods.co/blogs/seiko-mod-parts/seiko-nh38-movement-guide
+- SII, Technical Guide & Parts Catalogue Cal. NH3 Series (2011; quick-set window, timing conditions, day star by crown position): https://myretrowatches.co.uk/wp-content/uploads/2022/02/Seiko-nh35.pdf
+- Oceaneva, NH34 instructions (date and GMT-hand quick-set window): https://oceaneva.com/pages/nh34-instructions-manufactured-by-seiko-japan
+- namokiMODS, NH36 day wheels by crown position: https://www.namokimods.com/blogs/namokitimes/how-to-change-day-wheels-seiko-nh36a
 - Crystaltimes, NH35 (hand sizes, height with cannon pinion, fits 3 / 3.8 / 4.1 crown cases, price): https://usa.crystaltimes.net/shop/movements/nh35-movement-white-black-ct501/
 - Watch-Modz, movement prices: https://watch-modz.com/product-category/movements/
 - Tandorio, movement prices: https://tandoriowatch.com/collections/tmi-nh34-nh36etc
@@ -218,6 +251,7 @@ Dials, hands, inserts, crystals
 - Crystaltimes SKX crystals: https://usa.crystaltimes.net/product-category/skx007-mod-parts/skx007-sapphire-crystals/
 - Long Island Watch, SKX flat sapphire (31.5 × 2.9 mm, US$45): https://longislandwatch.com/flat-sapphire-crystal-for-skx007-skx009-007-flat/
 - Crystaltimes SKX013 crystal (28.0 × 2.8 mm): https://usa.crystaltimes.net/shop/products/ct044/
+- Esslinger, pressing a domed gasket-fit crystal: https://blog.esslinger.com/how-to-press-a-domed-gasket-fit-watch-crystal-into-place-with-a-watch-crystal-press/
 
 Cases
 - Lucius Atelier, Explorer-pattern 39 mm case: https://luciusatelier.com/products/explorer-watch-case-v2-39mm

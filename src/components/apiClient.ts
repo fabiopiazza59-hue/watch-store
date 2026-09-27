@@ -30,6 +30,13 @@ export class ApiError extends Error {
 }
 
 const NETWORK_ERROR = "We couldn't reach the workshop's server. Check your connection and try again.";
+const TIMEOUT_ERROR = "The designer is taking too long to answer. Please try again.";
+
+/**
+ * How long the chat waits for the designer. The server gives Claude 90 seconds and the route 120, so
+ * past this something has gone wrong on the way, and the customer gets a message instead of a spinner.
+ */
+const DESIGN_TIMEOUT_MS = 130_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -66,6 +73,7 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
       headers: init.body ? { "Content-Type": "application/json", ...init.headers } : init.headers,
     });
   } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") throw new ApiError(TIMEOUT_ERROR, 0);
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ApiError(NETWORK_ERROR, 0);
   }
@@ -82,11 +90,24 @@ export function requestDesign(input: {
   currentSpec: WatchSpec;
   history: ChatTurn[];
 }): Promise<DesignResponse> {
-  return request<DesignResponse>("/api/design", { method: "POST", body: JSON.stringify(input) });
+  return request<DesignResponse>("/api/design", {
+    method: "POST",
+    body: JSON.stringify(input),
+    signal: AbortSignal.timeout(DESIGN_TIMEOUT_MS),
+  });
 }
 
-export function placeOrder(input: { spec: WatchSpec; customer: Customer; notes: string }): Promise<Order> {
-  return request<Order>("/api/orders", { method: "POST", body: JSON.stringify(input) });
+/** A new order, with the `?t=` token of its customer confirmation link (null when none is needed). */
+export interface PlacedOrder extends Order {
+  confirmationToken: string | null;
+}
+
+export async function placeOrder(input: { spec: WatchSpec; customer: Customer; notes: string }): Promise<PlacedOrder> {
+  const order = await request<Order & { confirmationToken?: unknown }>("/api/orders", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return { ...order, confirmationToken: typeof order.confirmationToken === "string" ? order.confirmationToken : null };
 }
 
 export function changeOrderStatus(id: string, status: OrderStatus): Promise<Order> {

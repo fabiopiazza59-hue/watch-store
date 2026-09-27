@@ -16,21 +16,24 @@ export type ColorName =
   | "brown"
   | "gold";
 
-/** Words customers use for each colour. Keys double as the canonical names used in replies. */
+/**
+ * Words customers use for each colour, English first, then common French, Italian, Spanish and
+ * German ones (accents stripped). Keys double as the canonical names used in replies.
+ */
 export const COLOR_WORDS: Record<ColorName, string[]> = {
-  black: ["black", "noir", "onyx", "blacked"],
-  white: ["white", "snow", "polar"],
+  black: ["black", "noir", "onyx", "blacked", "noire", "nero", "nera", "negro", "negra", "schwarz"],
+  white: ["white", "snow", "polar", "blanc", "blanche", "bianco", "bianca", "blanco", "blanca", "weiss", "weiß"],
   cream: ["cream", "ivory", "beige", "vanilla", "eggshell", "sand", "champagne"],
-  blue: ["blue", "navy", "azure", "cobalt"],
+  blue: ["blue", "navy", "azure", "cobalt", "bleu", "bleue", "blu", "azul", "blau"],
   teal: ["teal", "turquoise", "petrol"],
-  green: ["green", "olive", "forest", "emerald", "sage"],
-  grey: ["grey", "gray", "slate", "graphite", "charcoal", "gunmetal", "anthracite"],
-  red: ["red", "burgundy", "maroon", "wine", "crimson", "bordeaux", "oxblood"],
-  orange: ["orange", "tangerine", "amber"],
-  salmon: ["salmon", "pink", "peach", "rose"],
-  silver: ["silver", "silvery"],
-  brown: ["brown", "tan", "chocolate", "cognac", "coffee", "tobacco", "camel"],
-  gold: ["gold", "golden", "gilt"],
+  green: ["green", "olive", "forest", "emerald", "sage", "vert", "verte", "verde", "grun"],
+  grey: ["grey", "gray", "slate", "graphite", "charcoal", "gunmetal", "anthracite", "gris", "grigio", "grau"],
+  red: ["red", "burgundy", "maroon", "wine", "crimson", "bordeaux", "oxblood", "rouge", "rosso", "rossa", "rojo", "roja"],
+  orange: ["orange", "tangerine", "amber", "arancione", "naranja"],
+  salmon: ["salmon", "pink", "peach", "rose", "rosa"],
+  silver: ["silver", "silvery", "argent", "argento", "plata", "silber"],
+  brown: ["brown", "tan", "chocolate", "cognac", "coffee", "tobacco", "camel", "marron", "marrone", "braun"],
+  gold: ["gold", "golden", "gilt", "oro", "dorado", "dore"],
 };
 
 const REFERENCE_SWATCHES: Record<ColorName, string[]> = {

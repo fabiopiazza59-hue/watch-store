@@ -84,11 +84,30 @@ describe("priceSpec lines and totals", () => {
     expect(result.partsCostEur).toBe(PARTS_COST);
     expect(result.lines.find((line) => line.kind === "labour")?.amountEur).toBe(labourFor(BENCH_MINUTES.base));
     expect(result.lines.find((line) => line.kind === "qc")?.amountEur).toBe(PRICING_CONFIG.qcEur);
+    const { overhead } = PRICING_CONFIG;
     expect(result.lines.filter((line) => line.kind === "overhead").map((line) => line.label)).toEqual([
       "Packaging",
-      "Inbound shipping share",
-      `Warranty reserve: ${PRICING_CONFIG.overhead.warrantyReservePctOfParts}% of parts`,
+      `Inbound shipping: 6 part parcels at €${overhead.inboundShippingEurPerPart}`,
+      "Insured, tracked shipping to the customer",
+      "Consumables and a spare stem",
+      `Warranty reserve: ${overhead.warrantyReservePctOfParts}% of parts`,
+      `Payment fee: ${overhead.paymentFeePct}% of the price paid`,
     ]);
+  });
+
+  it("charges inbound shipping per part, as a parcel each", () => {
+    const inbound = (changes: Partial<WatchSpec>) =>
+      quote(changes).lines.find((line) => line.label.startsWith("Inbound shipping"))?.amountEur;
+    const perPart = PRICING_CONFIG.overhead.inboundShippingEurPerPart;
+    expect(inbound({})).toBe(6 * perPart);
+    expect(inbound({ bezelInsertId: "insert" })).toBe(7 * perPart);
+    expect(inbound({ dialId: "nope" })).toBe(5 * perPart);
+  });
+
+  it("takes the payment fee on the price the customer pays, VAT included", () => {
+    const result = quote();
+    const fee = result.lines.find((line) => line.label.startsWith("Payment fee"));
+    expect(fee?.amountEur).toBe(Math.round(result.retailInclVatEur * PRICING_CONFIG.overhead.paymentFeePct) / 100);
   });
 
   it("reserves the warranty share of the parts cost, rounded to the cent", () => {
@@ -105,19 +124,34 @@ describe("priceSpec lines and totals", () => {
   });
 });
 
-describe("suggested retail price and margin", () => {
-  it("meets the target margin, then rounds up to a price ending in 9", () => {
-    const result = quote();
-    const atTarget = result.totalCostEur / (1 - PRICING_CONFIG.targetGrossMarginPct / 100);
-    expect(result.suggestedRetailEur % 10).toBe(9);
-    expect(result.suggestedRetailEur).toBeGreaterThanOrEqual(atTarget);
-    expect(result.suggestedRetailEur - atTarget).toBeLessThan(10);
+describe("consumer price, VAT and margin", () => {
+  const vatFactor = 1 + PRICING_CONFIG.vatRatePct / 100;
+  const marginOn = (net: number, cost: number) => ((net - cost) / net) * 100;
+
+  it.each<[string, Partial<WatchSpec>]>([
+    ["a plain build", {}],
+    ["a GMT on a bracelet with an insert", { movementId: "mv-gmt", bezelInsertId: "insert", strapId: "bracelet" }],
+  ])("shows a VAT-inclusive price ending in 9 and splits out the VAT, for %s", (_, changes) => {
+    const result = quote(changes);
+    expect(result.vatRatePct).toBe(PRICING_CONFIG.vatRatePct);
+    expect(result.retailInclVatEur % 10).toBe(9);
+    expect(cents(result.suggestedRetailEur) + cents(result.vatEur)).toBe(cents(result.retailInclVatEur));
+    expect(result.suggestedRetailEur * vatFactor).toBeCloseTo(result.retailInclVatEur, 1);
   });
 
-  it("reports the margin of the final rounded price", () => {
+  it("is the lowest such price that keeps the target margin on the price excluding VAT", () => {
     const result = quote();
-    const margin = ((result.suggestedRetailEur - result.totalCostEur) / result.suggestedRetailEur) * 100;
-    expect(result.marginPct).toBeCloseTo(margin, 1);
+    expect(marginOn(result.suggestedRetailEur, result.totalCostEur)).toBeGreaterThanOrEqual(PRICING_CONFIG.targetGrossMarginPct - 0.01);
+
+    // Ten euros less, with the payment fee on that lower price, would miss the target.
+    const lowerGross = result.retailInclVatEur - 10;
+    const feeDrop = (10 * PRICING_CONFIG.overhead.paymentFeePct) / 100;
+    expect(marginOn(lowerGross / vatFactor, result.totalCostEur - feeDrop)).toBeLessThan(PRICING_CONFIG.targetGrossMarginPct);
+  });
+
+  it("reports the margin earned on the price excluding VAT, after every cost", () => {
+    const result = quote();
+    expect(result.marginPct).toBeCloseTo(marginOn(result.suggestedRetailEur, result.totalCostEur), 1);
     expect(result.marginPct).toBeGreaterThanOrEqual(PRICING_CONFIG.targetGrossMarginPct);
   });
 });

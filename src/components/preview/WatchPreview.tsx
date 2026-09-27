@@ -12,6 +12,7 @@ import { DimensionsLayer } from "./dimensions";
 import { fmt, positive } from "./geometry";
 import { HandsLayer } from "./hands";
 import { computeLayout } from "./layout";
+import { isPrintableDialText } from "./printableText";
 import { StrapLayer } from "./strap";
 import { idFactory } from "./svg";
 
@@ -29,7 +30,8 @@ export interface WatchPreviewProps {
 /**
  * Top-down, to-scale drawing of a design. The viewBox is in millimetres and centred on the dial,
  * and every part is drawn from its catalogue dimensions, so what you see is what can be built:
- * a mismatched part looks mismatched.
+ * a mismatched part looks mismatched. Dial text that could never be printed (a brand, "Swiss", a
+ * dial that takes no print) is shown only as an outline of where it would go.
  */
 export function WatchPreview({ parts, personalization, size = 420, showDimensions = false, className }: WatchPreviewProps) {
   const idFor = idFactory(useId());
@@ -38,6 +40,7 @@ export function WatchPreview({ parts, personalization, size = 420, showDimension
   const px = fmt(positive(size, 420));
   // A dial made for another crown position sits turned (see DialLayer); hands are set against it.
   const dialTurn = layout.dialTurnDeg ? `rotate(${fmt(layout.dialTurnDeg)})` : undefined;
+  const dialTextPrintable = isPrintableDialText(parts.dial, personalization.dialText);
 
   return (
     <svg
@@ -46,7 +49,7 @@ export function WatchPreview({ parts, personalization, size = 420, showDimension
       width={px}
       height={px}
       role="img"
-      aria-label={describeWatch(parts, personalization.dialText)}
+      aria-label={describeWatch(parts, dialTextPrintable ? personalization.dialText : "")}
       className={className}
     >
       <SharedDefs idFor={idFor} viewHalf={half} />
@@ -65,6 +68,7 @@ export function WatchPreview({ parts, personalization, size = 420, showDimension
           watchCase={parts.case}
           dial={parts.dial}
           dialText={personalization.dialText}
+          dialTextPrintable={dialTextPrintable}
           layout={layout}
           idFor={idFor}
         />

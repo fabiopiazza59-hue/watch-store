@@ -1,8 +1,11 @@
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { CATALOG } from "@/domain/catalog";
+import { fitDialText } from "@/domain/dialTextFit";
 import type { Personalization, ResolvedSpec } from "@/domain/types";
 import { PREVIEW_FIXTURES } from "./__fixtures__/designs";
+import { computeLayout } from "./layout";
 import { PLACEHOLDER } from "./svg";
 import { WatchPreview } from "./WatchPreview";
 
@@ -115,6 +118,53 @@ describe("WatchPreview", () => {
     expect(blank).toBe(render(<WatchPreview parts={diver.parts} personalization={personalization()} />));
   });
 
+  it.each(["Rolex", "Swiss Made"])("never draws %s: only an outline marks where the text would go", (text) => {
+    const markup = render(<WatchPreview parts={diver.parts} personalization={personalization(text)} />);
+    expect(markup).not.toContain(text.toUpperCase());
+    expect(markup).not.toContain(text);
+    expect(layer(markup, "dial")).toContain('data-dial-text="not-printable"');
+  });
+
+  it("draws no text on a dial that can't be printed", () => {
+    const dial = diver.parts.dial;
+    if (!dial) throw new Error("fixture needs a dial");
+    const parts = { ...diver.parts, dial: { ...dial, printable: false } };
+    const markup = render(<WatchPreview parts={parts} personalization={personalization("Est 1952")} />);
+    expect(markup).not.toContain("EST 1952");
+    expect(markup).toContain('data-dial-text="not-printable"');
+  });
+
+  it("still shows text that is only too long, set smaller rather than squeezed", () => {
+    const short = render(<WatchPreview parts={diver.parts} personalization={personalization("Est 1952")} />);
+    const long = render(<WatchPreview parts={diver.parts} personalization={personalization("W".repeat(20))} />);
+    expect(long).toContain(`>${"W".repeat(20)}</text>`);
+    for (const markup of [short, long]) {
+      expect(markup).not.toMatch(/lengthAdjust|textLength/);
+    }
+    const size = (markup: string, line: string) =>
+      Number(markup.match(new RegExp(`font-size="([\\d.]+)"[^>]*>${line}</text>`))?.[1]);
+    expect(size(long, "W".repeat(20))).toBeLessThan(size(short, "EST 1952"));
+    expect(size(long, "W".repeat(20))).toBeGreaterThanOrEqual(size(short, "EST 1952") * 0.65 - 0.001);
+  });
+
+  it("sets dial text exactly as the rules engine measures it, so its legibility warning matches the drawing", () => {
+    const { case: watchCase, dial } = diver.parts;
+    if (!watchCase || !dial) throw new Error("fixture needs a case and a dial");
+    const chapterRing = Boolean(computeLayout(diver.parts).chapterRing);
+    for (const text of ["Est 1952", "W".repeat(20)]) {
+      const markup = render(<WatchPreview parts={diver.parts} personalization={personalization(text)} />);
+      const drawn = Number(markup.match(new RegExp(`font-size="([\\d.]+)"[^>]*>${text.toUpperCase()}</text>`))?.[1]);
+      expect(drawn).toBeCloseTo(fitDialText(dial, chapterRing, text).fontSize, 2);
+    }
+  });
+
+  it("draws a chapter ring for exactly the catalogue cases that have one, as the rules engine assumes", () => {
+    for (const watchCase of CATALOG.cases) {
+      const dial = CATALOG.dials.find((candidate) => Math.abs(candidate.diameterMm - watchCase.dialDiameterMm) <= 0.2);
+      expect(Boolean(computeLayout({ case: watchCase, dial }).chapterRing), watchCase.id).toBe(watchCase.chapterRing);
+    }
+  });
+
   it("is an image with a spoken summary of the design", () => {
     const markup = render(<WatchPreview parts={diver.parts} personalization={personalization()} />);
     expect(markup).toContain('role="img"');
@@ -122,6 +172,11 @@ describe("WatchPreview", () => {
 
     const empty = render(<WatchPreview parts={{}} personalization={personalization()} />);
     expect(empty).toMatch(/aria-label="case not chosen yet, dial not chosen yet, hands not chosen yet, strap not chosen yet"/);
+
+    const named = render(<WatchPreview parts={diver.parts} personalization={personalization("Est 1952")} />);
+    expect(named).toContain('dial text &quot;Est 1952&quot;"');
+    const brand = render(<WatchPreview parts={diver.parts} personalization={personalization("Rolex")} />);
+    expect(brand).toContain('aria-label="42 mm steel diver, black dial, Mercedes hands, black rubber strap"');
   });
 
   it("gives two previews on one page distinct ids, and every reference resolves", () => {

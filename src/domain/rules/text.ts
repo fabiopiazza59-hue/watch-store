@@ -2,8 +2,9 @@
  * Text review for dial printing and caseback engraving: length, printable characters, other watch
  * companies' trademarks and protected Swiss indications.
  *
- * Names are matched against the text's words (lowercased, accents stripped, punctuation treated as
- * a space, apostrophes dropped) glued back together, so "Rolex", "R O L E X", "tag-heuer" and "TagHeuer" all match.
+ * Names are matched against the text's words (lowercased, compatibility forms such as fullwidth
+ * letters folded to plain ones, accents stripped, punctuation treated as a space, apostrophes dropped)
+ * glued back together, so "Rolex", "R O L E X", "ＲＯＬＥＸ", "tag-heuer" and "TagHeuer" all match.
  * Two matching modes keep ordinary words printable:
  * - `word`: the name must cover whole words. For short or ambiguous names: "tag" catches "TAG" and
  *   "T.A.G." but not "Vintage" or "Stage"; "oris" does not catch "Doris".
@@ -12,6 +13,7 @@
  *   "Omega"). For long, distinctive names.
  * Look-alike substitutions ("R0LEX") are deliberately out of scope.
  */
+import type { Personalization } from "../types";
 
 interface ProtectedName {
   /** How the name is shown back to the customer. */
@@ -31,7 +33,7 @@ const WATCH_TRADEMARKS: ProtectedName[] = [
   { label: "Vacheron Constantin", affix: ["Vacheron"] },
   { label: "Cartier", affix: ["Cartier"] },
   { label: "Breitling", affix: ["Breitling"] },
-  { label: "TAG Heuer", word: ["TAG"], affix: ["Heuer"] },
+  { label: "TAG Heuer", word: ["TAG", "Heuer"], affix: ["TAG Heuer"] },
   { label: "Longines", affix: ["Longines"] },
   { label: "Tissot", affix: ["Tissot"] },
   { label: "Hublot", affix: ["Hublot"] },
@@ -48,14 +50,14 @@ const WATCH_TRADEMARKS: ProtectedName[] = [
   { label: "Blancpain", affix: ["Blancpain"] },
   { label: "Rado", word: ["Rado"] },
   { label: "Breguet", affix: ["Breguet"] },
-  { label: "A. Lange & Söhne", affix: ["Lange & Söhne", "Lange und Söhne"] },
+  { label: "A. Lange & Söhne", affix: ["Lange & Söhne", "Lange und Söhne", "Lange & Soehne", "Lange und Soehne"] },
   { label: "Chopard", affix: ["Chopard"] },
   { label: "Bulova", affix: ["Bulova"] },
   { label: "Swatch", word: ["Swatch"] },
   { label: "Richard Mille", word: ["Richard Mille"] },
   { label: "Montblanc", word: ["Montblanc"] },
   { label: "Nomos", word: ["Nomos"] },
-  { label: "Glashütte Original", word: ["Glashütte Original"] },
+  { label: "Glashütte Original", word: ["Glashütte Original", "Glashuette Original"] },
   { label: "Orient", word: ["Orient"] },
   { label: "Timex", affix: ["Timex"] },
   { label: "Fossil", word: ["Fossil"] },
@@ -104,9 +106,35 @@ const PROTECTED_INDICATIONS: ProtectedName[] = [
 export const ALLOWED_PUNCTUATION = [".", ",", "'", "&", "-"] as const;
 const ALLOWED_SYMBOLS = new Set<string>([" ", ...ALLOWED_PUNCTUATION]);
 
-/** Lowercase, accents stripped, whitespace collapsed: "  Genève  Swiss " → "geneve swiss". */
+/**
+ * Lowercase, compatibility forms folded, accents stripped, whitespace collapsed:
+ * "  Genève  Swiss " → "geneve swiss", "Ｏｍｅｇａ" → "omega", "ﬁeld" → "field".
+ */
 export function normalizeText(text: string): string {
-  return text.normalize("NFD").replace(/\p{M}+/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
+  return text.normalize("NFKD").replace(/\p{M}+/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** Typographic marks that phones and word processors type in place of `'` and `-`. */
+const TYPOGRAPHIC_PUNCTUATION: [RegExp, string][] = [
+  [/[\u2018\u2019\u02BC\u2032]/g, "'"],
+  [/[\u2010-\u2015\u2212]/g, "-"],
+];
+
+/**
+ * Personalization text as it should be stored and printed: typographic apostrophes (’ ‘ ʼ ′) become
+ * `'` and dashes (‐ – — −) become `-`, so "Grandpa’s" typed with smart punctuation is accepted as
+ * "Grandpa's". Apply it wherever customer text enters a spec; `reviewText` stays strict.
+ */
+export function normalizePersonalizationText(text: string): string {
+  return TYPOGRAPHIC_PUNCTUATION.reduce((result, [marks, ascii]) => result.replace(marks, ascii), text);
+}
+
+/** Both personalization texts through normalizePersonalizationText. */
+export function normalizePersonalization(personalization: Personalization): Personalization {
+  return {
+    dialText: normalizePersonalizationText(personalization.dialText),
+    casebackEngraving: normalizePersonalizationText(personalization.casebackEngraving),
+  };
 }
 
 /**
@@ -175,9 +203,14 @@ function findNames(run: WordRun, names: CompiledName[]): string[] {
   return names.filter((name) => name.terms.some((term) => containsTerm(run, term))).map((name) => name.label);
 }
 
+/**
+ * Letters of the Latin script (accented ones too), ASCII digits and the allowed symbols. Compatibility
+ * forms (fullwidth letters, ligatures such as "ﬁ", superscripts) are refused: they'd be printed as
+ * typed, and they are how a brand name slips past a plain-letter check.
+ */
 function isAllowedCharacter(char: string): boolean {
   if (/^[0-9]$/.test(char) || ALLOWED_SYMBOLS.has(char)) return true;
-  return /^\p{L}$/u.test(char) && /^\p{Script=Latin}$/u.test(char);
+  return /^\p{L}$/u.test(char) && /^\p{Script=Latin}$/u.test(char) && char.normalize("NFKC") === char;
 }
 
 export interface TextReview {

@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { PERSONALIZATION_LIMITS } from "@/domain/catalog";
+import { normalizePersonalizationText } from "@/domain/rules";
 import type { Issue, Personalization, ResolvedSpec, ValidationReport } from "@/domain/types";
 import { cardClass, inputClass } from "../ui/styles";
 
@@ -41,7 +42,7 @@ export function PersonalizationPanel({ personalization, parts, report, onChange 
           placeholder="e.g. Est. 2026"
           hint={dialHint}
           issues={issuesFor("dial-text")}
-          onChange={(dialText) => onChange({ ...personalization, dialText })}
+          onChange={(dialText) => onChange({ ...personalization, dialText: normalizePersonalizationText(dialText) })}
         />
         <TextField
           label="Caseback engraving"
@@ -50,7 +51,9 @@ export function PersonalizationPanel({ personalization, parts, report, onChange 
           placeholder="e.g. For Sam, 12 June 2026"
           hint={casebackHint}
           issues={issuesFor("caseback-engraving")}
-          onChange={(casebackEngraving) => onChange({ ...personalization, casebackEngraving })}
+          onChange={(casebackEngraving) =>
+            onChange({ ...personalization, casebackEngraving: normalizePersonalizationText(casebackEngraving) })
+          }
         />
       </div>
     </section>

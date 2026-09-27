@@ -1,4 +1,5 @@
 import { PERSONALIZATION_LIMITS } from "../../catalog";
+import { fitDialText } from "../../dialTextFit";
 import type { Personalization, SuggestedFix, WatchSpec } from "../../types";
 import { listJoin, quote } from "../format";
 import { finding, swaps, type Finding, type RuleContext } from "../model";
@@ -94,11 +95,34 @@ function contentFindings(spec: WatchSpec, text: TextField): Finding[] {
   return findings;
 }
 
-/** `dial-text`: custom dial text goes on a printable dial and is printable, original wording. */
+/**
+ * The line fits the dial only at a size too small to read: the preview sets it at its smallest
+ * legible size, which then runs into the markers. Measured with the same layout the preview draws.
+ */
+function tooWideFinding(spec: WatchSpec, { dial, case: watchCase }: RuleContext["parts"]): Finding[] {
+  const text = spec.personalization.dialText;
+  if (!dial || !dial.printable || text.trim().length > DIAL_TEXT.maxLength) return [];
+  const fit = fitDialText(dial, watchCase?.chapterRing ?? false, text);
+  if (fit.legible) return [];
+  return [
+    finding({
+      ruleId: "dial-text",
+      variant: "too-wide",
+      severity: "warning",
+      message:
+        `${quote(text.trim())} is too long to print legibly between the markers of the ${quote(dial.name)} dial: ` +
+        `about ${fit.maxLegibleCharacters} characters fit. Shorten it, or choose a dial with more room.`,
+      slots: ["dialId"],
+      remedies: [...swaps("dialId"), { patch: removal(spec, DIAL_TEXT) }],
+    }),
+  ];
+}
+
+/** `dial-text`: custom dial text goes on a printable dial, fits it legibly and is printable, original wording. */
 export function dialText({ spec, parts }: RuleContext): Finding[] {
   if (!spec.personalization.dialText.trim()) return [];
   const { dial } = parts;
-  const findings: Finding[] = [];
+  const findings: Finding[] = [...tooWideFinding(spec, parts)];
   if (dial && !dial.printable) {
     findings.push(
       finding({

@@ -2,7 +2,7 @@
 //
 // Procedures follow Seiko's NH3x/4R3x instructions and common modding practice. Where practice varies
 // between case makers the text says so rather than guessing.
-import { CATALOG, resolveSpec, SLOTS } from "./catalog";
+import { CATALOG, dateWheelColour, resolveSpec, SLOTS } from "./catalog";
 import type {
   BomLine,
   BuildSheet,
@@ -106,6 +106,20 @@ export function estimateBenchMinutes(parts: ResolvedSpec, personalization: Perso
 /** Timegrapher lift angle for the NH3x family (one source gives 54° for the NH34). */
 const LIFT_ANGLE_DEG = 53;
 
+/** Measurement conditions and limits from SII's NH3 technical guide. */
+const SII_TIMING = {
+  /** Crown turns that fully wind the mainspring. */
+  fullWindTurns: 55,
+  /** When to measure after a full wind. */
+  measureWindow: "10-60 minutes",
+  positions: "dial up, 9 o'clock up (crown down) and 6 o'clock up",
+  /** Largest spread between the fastest and slowest of those positions, s/day. */
+  maxPostureDifference: 60,
+} as const;
+
+/** Beat error the timing check accepts. Adjusting it at the stud carrier is beyond this sheet. */
+const MAX_BEAT_ERROR_MS = 0.6;
+
 /** Everything the steps and checks branch on, derived once from the resolved parts. */
 interface Build {
   parts: ResolvedSpec;
@@ -164,12 +178,39 @@ function formatMinutes(minutes: number): string {
   return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
 }
 
-/** Seiko's "do not quick-set" window for each NH3x variant, from the calibre instructions. */
-function quicksetBlackout(movement: Movement): string | null {
+interface QuicksetBlackout {
+  /** "9 p.m. and 4 a.m." */
+  window: string;
+  source: string;
+}
+
+/**
+ * When the crown's quick-set positions must not be used. SII's NH3 technical guide gives 9 p.m. to
+ * 4 a.m. for the date on the NH35 and NH36 (and the NH36's day); the NH34 isn't in that guide, and
+ * Seiko's 4R34/NH34 instructions give 9 p.m. to 3 a.m. for its date and its 24h hand.
+ */
+function quicksetBlackout(movement: Movement): QuicksetBlackout | null {
   if (!movement.hasDateWheel) return null;
-  if (movement.complications.includes("day")) return "9 p.m. and 4 a.m.";
-  if (movement.complications.includes("gmt")) return "9 p.m. and 3 a.m.";
-  return "9 p.m. and 1 a.m.";
+  if (movement.complications.includes("gmt")) return { window: "9 p.m. and 3 a.m.", source: "Seiko's NH34 instructions" };
+  return { window: "9 p.m. and 4 a.m.", source: "SII's NH3 technical guide" };
+}
+
+function dayWheelFor(crown: CrownPosition): string {
+  if (crown === 3) return "the standard day wheel (for a 3 o'clock crown)";
+  if (crown === 3.8) return "the '4 o'clock crown' day wheel (for a 3.8 o'clock crown)";
+  return `the day wheel for a ${crownLabel(crown)} crown`;
+}
+
+/**
+ * What to specify when ordering the movement: the date wheel colour that suits the dial and, for a
+ * day-date, the day wheel aligned for the case's crown position. Null when nothing shows through the dial.
+ */
+function movementVariant({ parts, showsDate, showsDay }: Build): string | null {
+  const { dial, case: watchCase } = parts;
+  if (!dial || !showsDate) return null;
+  const colour = dateWheelColour(dial);
+  if (!showsDay) return `with a ${colour} date wheel`;
+  return `with ${colour} day and date wheels${watchCase ? ` and ${dayWheelFor(watchCase.crownPosition)}` : ""}`;
 }
 
 type Falsy = false | null | undefined | "";
@@ -212,8 +253,10 @@ const engraveCaseback: StepBuilder = ({ engraving, parts }) =>
       }
     : null;
 
-const checkPartsIn: StepBuilder = ({ parts, showsDate }) => {
-  const { case: watchCase, dial, crystal, hands } = parts;
+const checkPartsIn: StepBuilder = (build) => {
+  const { parts } = build;
+  const { case: watchCase, dial, crystal, hands, movement } = parts;
+  const variant = movementVariant(build);
   const withNotes = Object.values(parts).some((part) => part?.dataNotes);
   const holes = hands && `${hands.holesMm.hour}/${hands.holesMm.minute}/${hands.holesMm.seconds}${hands.holesMm.gmt ? `/${hands.holesMm.gmt}` : ""}mm`;
   return {
@@ -225,10 +268,11 @@ const checkPartsIn: StepBuilder = ({ parts, showsDate }) => {
       Boolean(holes) && `Check the hand holes on the packet: ${holes} (hour/minute/seconds${hands?.holesMm.gmt ? "/24h" : ""}).`,
       Boolean(dial && parts.movement?.handHolesMm.gmt) &&
         `Measure the dial's centre hole: it should be about ${dial?.centerHoleMm}mm, wide enough for the 24-hour wheel. A standard 2.05mm hole won't go over it.`,
-      showsDate && "Check the movement's date disc colour suits the dial.",
+      Boolean(movement && variant) && `Check the ${movement?.caliber} came ${variant}.`,
     ),
     cautions: present([
-      withNotes && "Some values in the notes below are estimates or single-source: measure those parts now and correct the catalogue if they differ.",
+      withNotes &&
+        "Some values in the notes on these parts, under the parts list, are estimates or single-source: measure those parts now and correct the catalogue if they differ.",
       "If the crystal arrives already fitted in the case, leave it there; a well-seated crystal already proves the size.",
     ]),
   };
@@ -239,11 +283,12 @@ const testMovement: StepBuilder = ({ parts, displayBack }) => {
   if (!movement) return null;
   return {
     title: `Test the ${movement.caliber} before assembly`,
-    detail: `Wind the bare movement by the stem (about 20 turns gets it running) and put it on the timegrapher at ${movement.beatRateVph.toLocaleString("en-US")} vph, lift angle ${LIFT_ANGLE_DEG}°. Note rate, amplitude and beat error dial up. This baseline tells you later whether a fault came with the movement or from assembly.`,
+    detail: `Wind the bare movement fully by the stem (at least ${SII_TIMING.fullWindTurns} turns, as SII specifies) and, ${SII_TIMING.measureWindow} later, put it on the timegrapher at ${movement.beatRateVph.toLocaleString("en-US")} vph, lift angle ${LIFT_ANGLE_DEG}°. Note rate, amplitude and beat error ${SII_TIMING.positions}. This baseline tells you later whether a fault came with the movement or from assembly.`,
     cautions: present([
       "Keep the movement in its holder and wear finger cots from here on.",
       displayBack && "This watch has a display caseback: a fingerprint on the rotor or bridges will be on show for good.",
       "If the rate jumps around or is far out, demagnetise the movement before suspecting a fault.",
+      `If the beat error is already over ${MAX_BEAT_ERROR_MS} ms, the movement came that way: return or replace it rather than building it in.`,
     ]),
   };
 };
@@ -251,14 +296,18 @@ const testMovement: StepBuilder = ({ parts, displayBack }) => {
 const prepareCase: StepBuilder = ({ parts }) => {
   const { case: watchCase, crystal } = parts;
   if (!watchCase) return null;
+  const domed = crystal && crystal.shape !== "flat";
   return {
     title: "Prepare the case",
     detail: sentences(
       `Clean the ${watchCase.name} inside and out with the blower and rodico.`,
       crystal &&
-        `If the ${crystal.name} crystal isn't already fitted, press it into the crystal seat with its gasket, using the case press and flat nylon dies and pressing evenly.`,
+        (domed
+          ? `If the ${crystal.name} crystal isn't already fitted, press it into the crystal seat with its gasket using the case press, a flat support die under the case and a hollow (ring) die on top whose straight inner wall rests only on the crystal's outer edge, never on the dome. Press evenly.`
+          : `If the ${crystal.name} crystal isn't already fitted, press it into the crystal seat with its gasket, using the case press and flat nylon dies and pressing evenly.`),
     ),
     cautions: present([
+      domed && "Never press a domed crystal with a flat die: it bears on the top of the dome and loads the brittle centre, which can crack it.",
       crystal &&
         crystal.arCoating !== "none" &&
         `The crystal has anti-reflective coating on ${crystal.arCoating === "both" ? "both sides" : "the inside"}, which marks easily: clean it with the blower and rodico, not tissue.`,
@@ -274,12 +323,13 @@ const fitDial: StepBuilder = ({ parts, showsDate, showsDay, phantomDate, isGmt }
   return {
     title: "Fit the dial",
     detail: sentences(
+      phantomDate &&
+        "This dial has no date window, so the movement's date disc will be hidden underneath it. Before the dial goes on, pull the stem to the time-setting position (second click) and turn it slowly forwards until the date just snaps over: that is midnight. Leave the stem where it is until the hands are on.",
       `The NH3x has no dial screws or clamps: the dial's two feet are a friction fit in the holes of the movement's dial spacer ring. The ${dial.name} dial is footed for a ${crown} crown; if it came with four feet, clip off the pair for the other crown position.`,
       "Line the feet up with their holes and press the dial down evenly at its edge until it sits flat.",
       isGmt && "The NH34 needs a GMT dial with an enlarged centre hole (about 2.7-2.9mm) to clear its 24h pinion: check it clears before you press.",
       showsDate && "Check the date sits centred in the window before going further.",
       showsDay && "Check the day sits level and centred too. A crooked day means the NH36 day-wheel variant doesn't match this case's crown position: sort it out now.",
-      phantomDate && "This dial has no date window, so the movement's date disc is hidden underneath it.",
     ),
     cautions: [
       "Never press on a foot that isn't in its hole: it bends the foot or dents the dial.",
@@ -289,18 +339,21 @@ const fitDial: StepBuilder = ({ parts, showsDate, showsDay, phantomDate, isGmt }
   };
 };
 
-const fitHands: StepBuilder = ({ parts, isGmt }) => {
+const fitHands: StepBuilder = ({ parts, isGmt, phantomDate }) => {
   const { hands, movement, case: watchCase } = parts;
   if (!hands) return null;
   const hasDateWheel = movement?.hasDateWheel ?? true;
   const gmtHole = movement?.handHolesMm.gmt ?? hands.holesMm.gmt;
+  const timing = !hasDateWheel
+    ? `The ${movement?.caliber ?? "movement"} has no date to time against, so fit the hands at 12 with the stem in the time-setting position.`
+    : phantomDate
+      ? "The date is hidden under this dial, and the movement was left at midnight before the dial went on: with the stem still in the time-setting position, fit the hands at 12, so the hidden date still changes at midnight rather than at noon."
+      : "Pull the stem to the time-setting position (second click) and turn it slowly forwards until the date just snaps over to the next day: that is midnight. The hands go on at 12 in this position, so the date will change at midnight rather than at noon.";
   return {
     title: isGmt ? "Fit the four hands" : "Fit the hands",
     detail: sentences(
       "Lay the dial protector over the dial.",
-      hasDateWheel
-        ? "Pull the stem to the time-setting position (second click) and turn it slowly forwards until the date just snaps over to the next day: that is midnight. The hands go on at 12 in this position, so the date will change at midnight rather than at noon."
-        : `The ${movement?.caliber ?? "movement"} has no date to time against, so fit the hands at 12 with the stem in the time-setting position.`,
+      timing,
       isGmt &&
         `Press the 24h hand first: it has the largest hole${gmtHole ? ` (${gmtHole}mm)` : ""} and sits on the outermost, lowest pinion, just above the dial. Point it exactly at 24 (straight up).`,
       `Press the hour hand at 12, then the minute hand at 12.`,
@@ -331,11 +384,12 @@ const checkBeforeCasing: StepBuilder = ({ parts, showsDate, showsDay, isGmt }) =
       showsDate && "The date should snap over at midnight and at no other time.",
       showsDay && "Seiko's spec for this calibre: the date changes around midnight and the day around 4 a.m.",
       isGmt &&
-        "Then pull the stem to the first position and turn it clockwise, as you would the crown: the 24h hand should jump one hour per step and land exactly on each marker.",
+        `Then turn the hands on to about 6 o'clock, six hours past the date change and well clear of the no-quick-set window${blackout ? ` (between ${blackout.window})` : ""}. Only then pull the stem to the first position and turn it clockwise, as you would the crown: the 24h hand should jump one hour per step and land exactly on each marker.`,
     ),
     cautions: present([
       "Fix any rubbing now. Once cased, the only way back is through the whole stack.",
-      blackout && `Never use the calendar quick-set between ${blackout} (Seiko's instructions): it can stop the date changing or damage the mechanism.`,
+      blackout &&
+        `Never use the ${isGmt ? "date or 24h-hand" : "calendar"} quick-set between ${blackout.window} (${blackout.source}): it can stop the date changing or damage the mechanism.`,
     ]),
   };
 };
@@ -387,16 +441,16 @@ const regulate: StepBuilder = ({ parts, isGmt }) => {
   return {
     title: "Time and regulate",
     detail: sentences(
-      `With the caseback still off, wind fully and put the watch on the timegrapher (${movement.beatRateVph.toLocaleString("en-US")} vph, lift angle ${LIFT_ANGLE_DEG}°).`,
-      "Check dial up, crown down and crown up at least; all six positions if you have time.",
-      `The factory spec is ${formatAccuracy(movement)}, and careful regulation can usually get well inside that.`,
-      "Healthy amplitude fully wound is about 250-310°, and beat error should be under 0.6 ms.",
+      `With the caseback still off, wind fully (at least ${SII_TIMING.fullWindTurns} turns) and, ${SII_TIMING.measureWindow} later, put the watch on the timegrapher (${movement.beatRateVph.toLocaleString("en-US")} vph, lift angle ${LIFT_ANGLE_DEG}°).`,
+      `Measure ${SII_TIMING.positions}, SII's three test positions; all six if you have time.`,
+      `The factory spec is ${formatAccuracy(movement)} in each position, with no more than ${SII_TIMING.maxPostureDifference} s/day between the fastest and the slowest; careful regulation can usually get well inside that.`,
+      `Healthy amplitude fully wound is about 250-310°, and beat error should be under ${MAX_BEAT_ERROR_MS} ms.`,
       "Nudge the regulator lever towards + or - by half a division at a time and re-measure after each move.",
     ),
     cautions: present([
       "The NH3x regulator is very sensitive: move it a hair at a time.",
       "Low amplitude or an erratic trace is not a regulation problem. Look for a hand touching, dust or a damaged movement before going further.",
-      "Beat error is set at the stud carrier, which is advanced work: leave it alone while you're learning.",
+      `Beat error is set at the stud carrier, which is advanced work: leave it alone while you're learning. If it's over ${MAX_BEAT_ERROR_MS} ms and the baseline test showed it too, the movement came that way: return or replace it.`,
       isGmt && "Some sources give 54° as the NH34's lift angle. It changes the amplitude reading slightly, not the rate.",
     ]),
   };
@@ -446,11 +500,13 @@ const pressureTest: StepBuilder = ({ parts, screwDownCrown }) => {
   const bar = watchCase.waterResistanceM / 10;
   return {
     title: "Pressure test",
-    detail: `Test before the strap goes on. The case is rated ${watchCase.waterResistanceM}m, which is ${bar} bar: dry-test it at ${bar} bar. If your tester stops short of that, test at its maximum and record the pressure you reached on the order.`,
-    cautions: [
+    detail: `Test before the strap goes on. The case is rated ${watchCase.waterResistanceM}m, which is ${bar} bar: dry-test it at ${bar} bar. A test at a lower pressure is not a pass: if your tester can't reach ${bar} bar, have the watch tested on one that can before it ships.`,
+    cautions: present([
+      watchCase.waterResistanceEstimated &&
+        `The case maker hasn't confirmed the ${watchCase.waterResistanceM}m rating in writing: confirm it before testing, and never test above the rating the maker confirms.`,
       screwDownCrown ? "Screw the crown fully down before testing." : "Push the crown fully in before testing.",
       "If it fails, check the usual suspects in turn: crown and crown gasket, caseback gasket, crystal gasket.",
-    ],
+    ]),
   };
 };
 
@@ -467,7 +523,7 @@ const setAndFitStrap: StepBuilder = ({ parts, showsDate, showsDay, isGmt, bracel
     title: bracelet ? "Size the bracelet and set the watch" : "Set the watch and fit the strap",
     detail: sentences(
       quickset && blackout
-        ? `Wind it and set the hands to 6 o'clock, well clear of the no-quick-set window (between ${blackout}). In the first crown position, ${quickset}. Then set the final time, making sure a.m. and p.m. are right: the date changes at midnight.`
+        ? `Wind it and set the hands to 6 o'clock, well clear of the no-quick-set window (between ${blackout.window}). In the first crown position, ${quickset}. Then set the final time, making sure a.m. and p.m. are right: the date changes at midnight.`
         : "Wind it and set the time.",
       bracelet &&
         "Take links out to the customer's wrist size (ask if it isn't in the order notes), evenly from both sides of the clasp so the clasp stays centred.",
@@ -524,7 +580,7 @@ function qcChecks(build: Build): QcCheck[] {
     movement && {
       id: "qc-rate",
       label: "Timekeeping",
-      criterion: `${formatAccuracy(movement)} dial up, crown down and crown up, fully wound (lift angle ${LIFT_ANGLE_DEG}°); amplitude 250-310°, beat error under 0.6 ms.`,
+      criterion: `${formatAccuracy(movement)} ${SII_TIMING.positions}, measured ${SII_TIMING.measureWindow} after a full wind (lift angle ${LIFT_ANGLE_DEG}°), with no more than ${SII_TIMING.maxPostureDifference} s/day between the fastest and the slowest position; amplitude 250-310°, beat error under ${MAX_BEAT_ERROR_MS} ms.`,
     },
     movement && {
       id: "qc-run-in",
@@ -574,7 +630,7 @@ function qcChecks(build: Build): QcCheck[] {
     watchCase && {
       id: "qc-water",
       label: "Water resistance",
-      criterion: `No leak at ${watchCase.waterResistanceM / 10} bar (the case's ${watchCase.waterResistanceM}m rating). If your tester tops out lower, no leak at its maximum, with the pressure recorded on the order.`,
+      criterion: `No leak when tested at ${watchCase.waterResistanceM / 10} bar (the case's ${watchCase.waterResistanceM}m rating). A test at a lower pressure doesn't pass this check.`,
     },
     watchCase?.bezel === "unidirectional-120" && {
       id: "qc-bezel",
@@ -625,12 +681,12 @@ function qcChecks(build: Build): QcCheck[] {
 // BOM, tools and notes
 // ---------------------------------------------------------------------------
 
-function billOfMaterials(slots: SlotPart[], personalization: Personalization): BomLine[] {
-  const partLines = slots.flatMap(({ def, part }): BomLine[] =>
-    part
-      ? [{ slot: def.slot, partId: part.id, name: part.name, qty: 1, unitCostEur: part.costEur, supplierHint: part.supplierHint }]
-      : [],
-  );
+function billOfMaterials(slots: SlotPart[], personalization: Personalization, movementOrder: string | null): BomLine[] {
+  const partLines = slots.flatMap(({ def, part }): BomLine[] => {
+    if (!part) return [];
+    const name = part.category === "movement" && movementOrder ? `${part.name}, ${movementOrder}` : part.name;
+    return [{ slot: def.slot, partId: part.id, name, qty: 1, unitCostEur: part.costEur, supplierHint: part.supplierHint }];
+  });
   const serviceLines = requestedPersonalization(personalization).map(
     (service): BomLine => ({
       slot: "personalization",
@@ -645,7 +701,7 @@ function billOfMaterials(slots: SlotPart[], personalization: Personalization): B
 }
 
 function toolsFor({ parts, isGmt, bracelet }: Build): string[] {
-  const { movement, case: watchCase, bezelInsert } = parts;
+  const { movement, case: watchCase, bezelInsert, crystal } = parts;
   return present([
     "Movement holder for NH3x movements",
     isGmt
@@ -654,6 +710,7 @@ function toolsFor({ parts, isGmt, bracelet }: Build): string[] {
     "Hand levers, for lifting a hand that goes on wrong",
     "Dial protector sheet",
     "Case press with nylon dies (crystal, press-fit casebacks)",
+    crystal && crystal.shape !== "flat" && "Hollow (ring) crystal-press die sized to the crystal's edge, for the domed crystal",
     "Caseback wrench and case holder, for screw-down casebacks",
     "Rodico cleaning putty",
     "Finger cots or nitrile gloves",
@@ -669,7 +726,7 @@ function toolsFor({ parts, isGmt, bracelet }: Build): string[] {
       ? `Timegrapher (${movement.beatRateVph.toLocaleString("en-US")} vph, lift angle ${LIFT_ANGLE_DEG}°)`
       : "Timegrapher",
     "Demagnetiser",
-    watchCase ? `Pressure tester (the case is rated ${watchCase.waterResistanceM / 10} bar)` : "Pressure tester",
+    watchCase ? `Pressure tester that reaches ${watchCase.waterResistanceM / 10} bar (the case's rating)` : "Pressure tester",
     "Spring-bar tool",
     bracelet && "Bracelet link tool (pin pusher or fine screwdrivers, to suit the link pins)",
     bezelInsert && "Isopropyl alcohol and lint-free swabs",
@@ -678,7 +735,7 @@ function toolsFor({ parts, isGmt, bracelet }: Build): string[] {
 
 function notesFor(build: Build, slots: SlotPart[]): string[] {
   const { parts, phantomDate, hiddenDay } = build;
-  const missing = slots.filter(({ def, id, part }) => !part && !(def.optional && id === null));
+  const missing = slots.filter(({ def, id, part }) => !part && !(def.optional && !id));
   const dataNotes = slots.flatMap(({ part }) => (part?.dataNotes ? [`${part.name}: ${part.dataNotes}`] : []));
   return present([
     missing.length > 0 &&
@@ -708,7 +765,7 @@ export function createBuildSheet(spec: WatchSpec, catalog: Catalog = CATALOG): B
   return {
     title: `Build sheet: ${spec.name.trim() || "Untitled design"}`,
     summary: summaryFor(build, estimatedBenchMinutes),
-    bom: billOfMaterials(slots, spec.personalization),
+    bom: billOfMaterials(slots, spec.personalization, movementVariant(build)),
     tools: toolsFor(build),
     steps: present(STEPS.map((step) => step(build))),
     qcChecks: qcChecks(build),

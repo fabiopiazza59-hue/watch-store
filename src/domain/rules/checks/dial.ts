@@ -92,7 +92,7 @@ export function dateWindow({ parts }: RuleContext): Finding[] {
         severity: "error",
         message:
           `The ${dialName} dial has ${dateWindowLabel(dial.dateWindow)}, but the ${movement.caliber} ` +
-          `has no date wheel, so the window would just show an empty disc.`,
+          `has no date wheel, so the window would open onto bare movement instead of a date.`,
         slots: ["dialId", "movementId"],
         remedies: swaps("dialId", "movementId"),
       }),

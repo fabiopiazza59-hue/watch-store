@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Catalog, Dial, HandSet, Part, WatchCase } from "../types";
 import { validateSpec } from "../rules";
-import { CATALOG, DEFAULT_SPEC, TEMPLATES, resolveSpec } from ".";
+import { CATALOG, DEFAULT_SPEC, TEMPLATES, dateWheelColour, resolveSpec } from ".";
 
 const CATEGORY_BY_KEY: Record<keyof Catalog, Part["category"]> = {
   movements: "movement",
@@ -86,6 +86,14 @@ describe("catalogue integrity", () => {
     }
   });
 
+  it("flags every water-resistance rating the maker hasn't confirmed, with a note on the figure used", () => {
+    const unconfirmed = CATALOG.cases.filter((c) => c.waterResistanceEstimated);
+    expect(unconfirmed.map((c) => c.id)).toEqual(["case-diver-39", "case-dress-39", "case-pilot-39"]);
+    for (const c of unconfirmed) expect(c.dataNotes, c.id).toContain(`${c.waterResistanceM}m`);
+    // The compact diver's maker publishes 5 ATM / 50 m; nothing higher may be claimed until confirmed.
+    expect(CATALOG.cases.find((c) => c.id === "case-diver-39")?.waterResistanceM).toBe(50);
+  });
+
   it("only fits bracelets to cases that exist and share their width", () => {
     for (const s of CATALOG.straps) {
       for (const caseId of s.compatibleCaseIds ?? []) {
@@ -101,7 +109,7 @@ describe("catalogue coverage", () => {
   it.each(CATALOG.cases.map((c) => [c.id, c] as const))("%s has enough compatible parts", (_, c) => {
     const dials = CATALOG.dials.filter((d) => dialFitsCase(d, c));
     const hands = CATALOG.hands.filter((h) => !h.includesGmt && dials.some((d) => handsFitDial(h, d)));
-    const crystals = CATALOG.crystals.filter((x) => within(x.diameterMm, c.crystalDiameterMm, 0.1));
+    const crystals = CATALOG.crystals.filter((x) => within(x.diameterMm, c.crystalDiameterMm, 0.05));
     const straps = CATALOG.straps.filter(
       (s) => s.widthMm === c.lugWidthMm && (!s.compatibleCaseIds?.length || s.compatibleCaseIds.includes(c.id)),
     );
@@ -128,6 +136,45 @@ describe("catalogue coverage", () => {
     expect(distinct(CATALOG.cases.map((c) => c.lugWidthMm))).toBeGreaterThanOrEqual(2);
     expect(distinct(CATALOG.bezelInserts.map((i) => i.outerMm))).toBeGreaterThanOrEqual(2);
     expect(distinct(CATALOG.movements.map((m) => m.dateDisplay))).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("NH34 seconds-hand clearance", () => {
+  const nh34Spec = (caseId: string, crystalId: string) => ({
+    ...DEFAULT_SPEC,
+    movementId: "mv-nh34a",
+    caseId,
+    dialId: "dial-gmt-black",
+    handsId: "hands-gmt-mercedes-red",
+    crystalId,
+    bezelInsertId: null,
+    strapId: "strap-leather-black-20",
+  });
+  const clearanceWarnings = (spec: ReturnType<typeof nh34Spec>) =>
+    validateSpec(spec).issues.filter((i) => i.ruleId === "hand-clearance" && i.slots.includes("crystalId"));
+
+  it("warns about a flat crystal in the dress case, which is only sold NH34-ready with its double-dome", () => {
+    const [issue] = clearanceWarnings(nh34Spec("case-dress-39", "crystal-sapphire-flat-295"));
+    expect(issue.severity).toBe("warning");
+    expect(issue.fixes[0]?.patch).toEqual({ crystalId: "crystal-sapphire-dd-295" });
+    expect(clearanceWarnings(nh34Spec("case-dress-39", "crystal-sapphire-dd-295"))).toEqual([]);
+  });
+
+  it("leaves the Travel GMT, in a case sold NH34-ready with its flat crystal, without a clearance warning", () => {
+    const travel = TEMPLATES.find((t) => t.id === "tpl-travel-gmt")!;
+    expect(validateSpec(travel.spec).issues.filter((i) => i.ruleId === "hand-clearance")).toEqual([]);
+  });
+});
+
+describe("dateWheelColour", () => {
+  it.each([
+    ["#15171a", "black"],
+    ["#1d3a6b", "black"],
+    ["#efe6d2", "white"],
+    ["#fff", "white"],
+    ["not a colour", "black"],
+  ] as const)("%s gets a %s date wheel", (colorHex, colour) => {
+    expect(dateWheelColour({ colorHex })).toBe(colour);
   });
 });
 

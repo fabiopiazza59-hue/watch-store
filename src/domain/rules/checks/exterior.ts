@@ -4,8 +4,11 @@ import { finding, swaps, type Finding, type RuleContext } from "../model";
 import { mm, outOfTolerance } from "../units";
 import { isGmtMovement } from "./hands";
 
-/** Largest difference between crystal and crystal seat that still presses in and seals. */
-export const CRYSTAL_SEAT_TOLERANCE_MM = 0.1;
+/**
+ * Largest difference between crystal and crystal seat that still presses in and seals. Crystals are
+ * sold in 0.1 mm steps and one step off won't seal, so only the seat's own nominal size passes.
+ */
+export const CRYSTAL_SEAT_TOLERANCE_MM = 0.05;
 /** Largest difference between insert and bezel seat (outer and inner diameter). */
 export const INSERT_SEAT_TOLERANCE_MM = 0.1;
 

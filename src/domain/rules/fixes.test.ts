@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { CATALOG, partsForSlot, SLOTS, TEMPLATES } from "../catalog";
 import type { Catalog, Issue, ValidationReport, WatchSpec } from "../types";
 import { validateSpec } from ".";
 import { BASE_SPEC, byId, FIELD_SPEC, fixtureCatalog, specWith } from "./__fixtures__/catalog";
+import { collectFindings } from "./engine";
 
 function applyFix(spec: WatchSpec, fix: Issue["fixes"][number]): WatchSpec {
   return { ...spec, ...fix.patch };
@@ -67,6 +69,31 @@ describe("every suggested fix", () => {
       }
     }
   });
+
+  // The real parts library, keyed by each finding's exact condition rather than its rule: every template
+  // with every part swapped into every slot, one at a time.
+  it.each(TEMPLATES.map((template) => [template.id, template.spec] as const))(
+    "resolves exactly its own finding on the real catalogue, for every single-part swap of %s",
+    (_id, template) => {
+      for (const { slot } of SLOTS) {
+        for (const part of partsForSlot(slot)) {
+          const spec: WatchSpec = { ...template, [slot]: part.id };
+          const findings = collectFindings(spec, CATALOG);
+          const { issues } = validateSpec(spec);
+          const errorsBefore = new Set(findings.filter((f) => f.severity === "error").map((f) => f.key));
+          findings.forEach((target, index) => {
+            for (const fix of issues[index].fixes) {
+              const after = collectFindings(applyFix(spec, fix), CATALOG);
+              const label = `${target.key} in ${slot}=${part.id}: ${fix.description}`;
+              expect(after.map((f) => f.key), label).not.toContain(target.key);
+              const newErrors = after.filter((f) => f.severity === "error" && !errorsBefore.has(f.key));
+              expect(newErrors.map((f) => f.key), label).toEqual([]);
+            }
+          });
+        }
+      }
+    },
+  );
 
   it("is a short imperative sentence naming the part", () => {
     const { fixes } = issueOf("strap-width", specWith({ strapId: "strap-nato-olive-20" }));

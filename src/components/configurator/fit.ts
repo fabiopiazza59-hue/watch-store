@@ -1,13 +1,25 @@
 import type { Issue, OptionStatus, Severity, SlotKey, ValidationReport } from "@/domain/types";
+import { plural } from "../ui/format";
 
-/** How well a candidate part fits the rest of the design. */
-export type Fit = "fits" | "caveats" | "wont-fit";
+/**
+ * How well a candidate part fits the rest of the design. "fits-with-changes": it doesn't fit as the
+ * design stands, but it does once a few other parts change to suit it.
+ */
+export type Fit = "fits" | "caveats" | "fits-with-changes" | "wont-fit";
 
-export const FIT_LABELS: Record<Fit, string> = {
-  fits: "Fits",
-  caveats: "Fits with caveats",
-  "wont-fit": "Won't fit",
-};
+/** "Fits with 3 changes"; `changeCount` only counts for "fits-with-changes". */
+export function fitLabel(fit: Fit, changeCount = 0): string {
+  switch (fit) {
+    case "fits":
+      return "Fits";
+    case "caveats":
+      return "Fits with caveats";
+    case "fits-with-changes":
+      return `Fits with ${plural(changeCount, "change")}`;
+    case "wont-fit":
+      return "Won't fit";
+  }
+}
 
 export function fitOf(option: OptionStatus): Fit {
   if (!option.compatible) return "wont-fit";

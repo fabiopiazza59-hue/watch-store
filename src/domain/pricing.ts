@@ -1,10 +1,10 @@
-// Cost breakdown, suggested retail price and lead time for one watch. Part costs live in the
-// catalogue; everything else the workshop spends per watch is set in PRICING_CONFIG.
+// Cost breakdown, consumer price and lead time for one watch. Part costs live in the catalogue;
+// everything else the workshop spends per watch is set in PRICING_CONFIG.
 import { estimateBenchMinutes, partsBySlot, PERSONALIZATION_SERVICES, requestedPersonalization } from "./buildSheet";
 import { CATALOG, resolveSpec } from "./catalog";
 import type { Catalog, PriceLine, PriceQuote, WatchSpec } from "./types";
 
-/** Per-watch costs and pricing policy. All money is EUR excluding VAT. */
+/** Per-watch costs and pricing policy. All money is EUR excluding VAT unless a name says otherwise. */
 export const PRICING_CONFIG = {
   /**
    * Bought-in dial printing and caseback engraving, per unit. Their costs and lead times are
@@ -17,12 +17,27 @@ export const PRICING_CONFIG = {
   qcEur: 10,
   overhead: {
     packagingEur: 9,
-    /** Each watch's share of inbound shipping and import costs for its parts. */
-    inboundShippingEur: 6,
+    /**
+     * Inbound shipping and import handling per part, as a first approximation that each part of a one-off
+     * build arrives as its own parcel from a different shop. Revisit it once real supplier invoices exist.
+     */
+    inboundShippingEurPerPart: 4,
+    /** Insured, tracked shipping to the customer. */
+    outboundShippingEur: 12,
+    /** A spare stem (Seiko 351-200) while learning, gaskets, thread-locker and grease. */
+    consumablesEur: 6,
     /** Set aside for warranty repairs, as a percentage of the parts cost. */
     warrantyReservePctOfParts: 5,
+    /** Card or PayPal processing, as a percentage of the VAT-inclusive price the customer pays. */
+    paymentFeePct: 2.5,
   },
-  /** Gross margin the suggested retail price aims for before charm rounding. */
+  /**
+   * VAT included in the consumer price, percent: EU consumer prices must include VAT (Directive 98/6/EC).
+   * A placeholder for the workshop's home-country standard rate; 0 for a VAT-exempt small business.
+   * Destination-country rates for cross-border EU sales (OSS) are not modelled yet.
+   */
+  vatRatePct: 20,
+  /** Gross margin on the price excluding VAT, after every cost, that pricing aims for before charm rounding. */
   targetGrossMarginPct: 45,
   /** Assembly, regulation, 24-hour run-in and pressure test once every part is in. */
   benchAndQcDays: 3,
@@ -47,9 +62,14 @@ interface CentLine {
   cents: number;
 }
 
-/** Cost breakdown, suggested retail price and lead time for one unit. Pure; unknown parts add nothing. */
+/**
+ * Cost breakdown, consumer price and lead time for one unit. Pure; unknown parts add nothing.
+ *
+ * The consumer price includes VAT and ends in 9. It is the smallest such price whose share excluding VAT
+ * keeps the target margin after every cost, the payment fee included (charged on the price paid).
+ */
 export function priceSpec(spec: WatchSpec, catalog: Catalog = CATALOG): PriceQuote {
-  const { labourRateEurPerHour, qcEur, overhead, targetGrossMarginPct, benchAndQcDays } = PRICING_CONFIG;
+  const { labourRateEurPerHour, qcEur, overhead, vatRatePct, targetGrossMarginPct, benchAndQcDays } = PRICING_CONFIG;
   const parts = partsBySlot(spec, catalog).flatMap(({ def, part }) => (part ? [{ label: def.label, part }] : []));
   const services = requestedPersonalization(spec.personalization);
   const benchMinutes = estimateBenchMinutes(resolveSpec(spec, catalog), spec.personalization);
@@ -70,7 +90,13 @@ export function priceSpec(spec: WatchSpec, catalog: Catalog = CATALOG): PriceQuo
     },
     { label: "QC: timegrapher regulation and pressure test", kind: "qc", cents: toCents(qcEur) },
     { label: "Packaging", kind: "overhead", cents: toCents(overhead.packagingEur) },
-    { label: "Inbound shipping share", kind: "overhead", cents: toCents(overhead.inboundShippingEur) },
+    {
+      label: `Inbound shipping: ${parts.length} part ${parts.length === 1 ? "parcel" : "parcels"} at €${overhead.inboundShippingEurPerPart}`,
+      kind: "overhead",
+      cents: parts.length * toCents(overhead.inboundShippingEurPerPart),
+    },
+    { label: "Insured, tracked shipping to the customer", kind: "overhead", cents: toCents(overhead.outboundShippingEur) },
+    { label: "Consumables and a spare stem", kind: "overhead", cents: toCents(overhead.consumablesEur) },
     {
       label: `Warranty reserve: ${overhead.warrantyReservePctOfParts}% of parts`,
       kind: "overhead",
@@ -78,10 +104,24 @@ export function priceSpec(spec: WatchSpec, catalog: Catalog = CATALOG): PriceQuo
     },
   ];
 
+  // The payment fee grows with the price, so the net price that keeps the target margin is solved for:
+  // net - costs - fee% * net * (1 + VAT) = margin% * net.
+  const vatFactor = 1 + vatRatePct / 100;
+  const feeShare = overhead.paymentFeePct / 100;
+  const costsBeforeFee = fromCents(sum(lines.map((line) => line.cents)));
+  const netAtTarget = costsBeforeFee / (1 - targetGrossMarginPct / 100 - feeShare * vatFactor);
+  const retailInclVatEur = charmPrice(netAtTarget * vatFactor);
+  const grossCents = toCents(retailInclVatEur);
+  const netCents = Math.round(grossCents / vatFactor);
+  lines.push({
+    label: `Payment fee: ${overhead.paymentFeePct}% of the price paid`,
+    kind: "overhead",
+    cents: Math.round(grossCents * feeShare),
+  });
+
   const centsOf = (...kinds: PriceLine["kind"][]) => sum(lines.filter((line) => kinds.includes(line.kind)).map((line) => line.cents));
   const totalCents = sum(lines.map((line) => line.cents));
-  const suggestedRetailEur = charmPrice(fromCents(totalCents) / (1 - targetGrossMarginPct / 100));
-  const marginPct = Math.round(((suggestedRetailEur - fromCents(totalCents)) / suggestedRetailEur) * 1000) / 10;
+  const marginPct = Math.round(((netCents - totalCents) / netCents) * 1000) / 10;
 
   const slowestPartDays = Math.max(0, ...parts.map(({ part }) => part.leadTimeDays));
   // Printing and engraving run in parallel, after their part arrives, which may be the last one in.
@@ -95,7 +135,10 @@ export function priceSpec(spec: WatchSpec, catalog: Catalog = CATALOG): PriceQuo
     labourCostEur: fromCents(centsOf("labour", "qc")),
     overheadCostEur: fromCents(centsOf("overhead")),
     totalCostEur: fromCents(totalCents),
-    suggestedRetailEur,
+    suggestedRetailEur: fromCents(netCents),
+    vatRatePct,
+    vatEur: fromCents(grossCents - netCents),
+    retailInclVatEur,
     marginPct,
     leadTimeDays: slowestPartDays + personalizationDays + benchAndQcDays,
   };

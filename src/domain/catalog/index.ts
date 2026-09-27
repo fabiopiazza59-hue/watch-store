@@ -14,6 +14,7 @@ import { hands } from "./hands";
 import { movements } from "./movements";
 import { straps } from "./straps";
 
+export { dateWheelColour, type DateWheelColour } from "./dateWheel";
 export { TEMPLATES, type DesignTemplate } from "./templates";
 
 /** The parts library: every part the workshop can source, with real dimensions. */

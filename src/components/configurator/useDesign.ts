@@ -1,3 +1,4 @@
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { DEFAULT_SPEC } from "@/domain/catalog";
 import type { WatchSpec } from "@/domain/types";
@@ -61,17 +62,25 @@ function createDesignStore(shared: WatchSpec | null): DesignStore {
 /**
  * The configurator's design: a shared link wins, then the design saved in this browser, then the
  * default. Every change is saved. A shared design is saved on arrival and the `?d=` parameter
- * dropped from the address bar, so reloading keeps the customer's edits rather than the link.
+ * dropped, so reloading keeps the customer's edits rather than the link.
+ *
+ * Returns the design, a setter, and a getter for the design as it is now, for code that runs after
+ * an await, when the design it rendered with may have changed.
  */
-export function useDesign(shared: WatchSpec | null): [WatchSpec, (spec: WatchSpec) => void] {
+export function useDesign(shared: WatchSpec | null): [WatchSpec, (spec: WatchSpec) => void, () => WatchSpec] {
   const [store] = useState(() => createDesignStore(shared));
   const spec = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getServerSnapshot);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!shared) return;
     saveSpec(shared);
-    window.history.replaceState(null, "", window.location.pathname);
-  }, [shared]);
+    // Through the router, not history.replaceState: this runs before the App Router has taken over
+    // history, and a native replaceState here wipes the state Back and Forward depend on. Replacing
+    // (not pushing) also means Back can never return to the link and overwrite later edits.
+    router.replace(pathname, { scroll: false });
+  }, [shared, router, pathname]);
 
-  return [spec, store.set];
+  return [spec, store.set, store.getSnapshot];
 }

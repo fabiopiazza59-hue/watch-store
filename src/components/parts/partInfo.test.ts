@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CATALOG, findPart } from "@/domain/catalog";
 import type { Part } from "@/domain/types";
-import { partHighlights, partSwatch } from "./partInfo";
+import { partHighlights, partSwatch, waterResistanceLabel } from "./partInfo";
 
 const everyPart: Part[] = Object.values(CATALOG).flat();
 
@@ -23,6 +23,22 @@ describe("partHighlights", () => {
       "22 mm lugs",
       "200 m",
     ]);
+  });
+
+  it("marks a water resistance the case maker hasn't confirmed", () => {
+    const estimated = CATALOG.cases.filter((watchCase) => watchCase.waterResistanceEstimated);
+    expect(estimated.map((watchCase) => watchCase.id).sort()).toEqual(["case-diver-39", "case-dress-39", "case-pilot-39"]);
+    for (const watchCase of estimated) {
+      expect(partHighlights(watchCase)).toContain(`${watchCase.waterResistanceM} m (to be confirmed)`);
+    }
+    expect(waterResistanceLabel({ waterResistanceM: 200 })).toBe("200 m");
+  });
+
+  it("tells a dial's crown position in plain clock terms, without other brands' model names", () => {
+    const dialHighlights = CATALOG.dials.flatMap((dial) => partHighlights(dial));
+    expect(dialHighlights).toContain("crown at about 4 o'clock");
+    expect(dialHighlights).toContain("crown at 3 o'clock");
+    expect(dialHighlights.join(" ")).not.toMatch(/SKX|3\.8/);
   });
 
   it("names the movement's caliber and complications", () => {

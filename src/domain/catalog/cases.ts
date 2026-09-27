@@ -58,13 +58,14 @@ export const cases: WatchCase[] = [
     insertMm: { outer: 36.5, inner: 30.5 },
     chapterRing: false,
     caseback: "solid",
-    waterResistanceM: 200,
+    waterResistanceM: 50,
+    waterResistanceEstimated: true,
     handClearanceMm: 1.9,
     costEur: 60,
     leadTimeDays: 21,
     supplierHint: "39mm vintage-diver pattern NH case. Its inserts are smaller than the 38mm SKX-style ones.",
     dataNotes:
-      "Insert size is from one maker's 39mm pattern. The crystal seat is an estimate, and listed water resistance for this pattern ranges from 50 to 200m, so confirm all three with the case maker.",
+      "The maker's spec lists 5 ATM / 50m (its product title says 10 ATM), so 50m is used until the maker confirms a higher rating in writing. The insert size comes from the same single source and the crystal seat is an estimate: confirm both with the case maker.",
   },
   {
     id: "case-field-38",
@@ -115,12 +116,14 @@ export const cases: WatchCase[] = [
     chapterRing: true,
     caseback: "display",
     waterResistanceM: 50,
+    waterResistanceEstimated: true,
     handClearanceMm: 2,
+    nh34ReadyCrystals: ["double-dome"],
     costEur: 70,
     leadTimeDays: 21,
     supplierHint: "'GS-style' 39mm NH case with a sapphire exhibition caseback. It uses the 29.5mm crystal family.",
     dataNotes:
-      "The reference case is rated 200m with a screw-down crown. This push-pull, display-back version is listed at a conservative 50m until the maker confirms.",
+      "The reference case is rated 200m with a screw-down crown. This push-pull, display-back version is listed at a conservative 50m until the maker confirms. The reference case is sold NH34-ready with its 29.5 x 1.5 x 3mm double-dome; a flat crystal leaves an NH34's seconds hand too little room.",
   },
   {
     id: "case-pilot-39",
@@ -142,13 +145,14 @@ export const cases: WatchCase[] = [
     bezel: "none",
     chapterRing: false,
     caseback: "solid",
-    waterResistanceM: 100,
+    waterResistanceM: 50,
+    waterResistanceEstimated: true,
     handClearanceMm: 1.7,
     costEur: 40,
     leadTimeDays: 21,
     supplierHint: "Vintage-pilot pattern NH case for 33.5mm dials (the movement sits in a wider dial ring).",
     dataNotes:
-      "The maker lists a sapphire crystal but no size, so the 34.5mm seat is an estimate. Water resistance is not published for the steel version; 100m is assumed.",
+      "The maker lists a sapphire crystal but no size, so the 34.5mm seat is an estimate. The maker publishes no water-resistance rating (only a screw-down crown), so a conservative 50m is used until the maker confirms one in writing.",
   },
   {
     id: "case-gmt-40",
@@ -173,11 +177,13 @@ export const cases: WatchCase[] = [
     caseback: "solid",
     waterResistanceM: 200,
     handClearanceMm: 1.9,
+    nh34ReadyCrystals: ["flat"],
     costEur: 65,
     leadTimeDays: 21,
     supplierHint:
-      "40mm dive/GMT-pattern NH case with a bidirectional bezel. Takes the same 38 x 30.6mm sloped inserts as SKX-style cases.",
-    dataNotes: "The crystal seat (30.5mm) is an estimate because the makers found do not publish it. Confirm it before ordering spare crystals.",
+      "40mm dive/GMT-pattern NH case: order the version with a bidirectional 24-hour bezel, as many 40mm cases of this pattern have a one-way 120-click bezel. Takes the same 38 x 30.6mm sloped inserts as SKX-style cases.",
+    dataNotes:
+      "The bidirectional 24-click bezel is unconfirmed: the 40mm case cited for this pattern has a one-way 120-click bezel, so confirm the bezel action with the maker before ordering. The crystal seat (30.5mm) is an estimate because the makers found do not publish it; confirm it before ordering spare crystals. The cited maker lists NH34 compatibility with its flat sapphire.",
   },
   {
     id: "case-field-ti-39",

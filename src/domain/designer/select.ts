@@ -23,11 +23,15 @@ import type {
 import { colorMatch, colorSimilarity, lightness, type ColorName } from "./colors";
 import type { DesignIntent } from "./intent";
 
-/** Each slot is chosen knowing the slots before it: the case sets dial size and lug width, and so on. */
+/**
+ * Each slot is chosen knowing the slots before it: the case sets dial size and lug width, and so
+ * on. The dial comes before the movement: its date window and centre hole decide which movement
+ * fits, while the movement itself carries little taste.
+ */
 export const SELECTION_ORDER: SlotKey[] = [
   "caseId",
-  "movementId",
   "dialId",
+  "movementId",
   "handsId",
   "bezelInsertId",
   "crystalId",
@@ -47,10 +51,30 @@ const KEEP_BONUS: Record<SlotKey, number> = {
   crystalId: 1,
   strapId: 2,
 };
-const WARNING_PENALTY = 1.5;
-/** How much the best reachable dial and strap count towards a case's score. */
+/**
+ * Keeping a part that lacks what the customer asked for is worth only a tie-break: when nothing
+ * that fits has it either, the part stays rather than being swapped for an equally wrong one.
+ */
+const UNWANTED_KEEP_BONUS = 0.5;
+/**
+ * What a warning costs a candidate. Hands take more: a style-matched hand set that fits the dial
+ * beats a favourite one whose minute hand is too short for it.
+ */
+const WARNING_PENALTY: Record<SlotKey, number> = {
+  caseId: 1.5,
+  movementId: 1.5,
+  dialId: 1.5,
+  handsId: 5,
+  bezelInsertId: 1.5,
+  crystalId: 1.5,
+  strapId: 1.5,
+};
+/** How much the best reachable dial, strap and (when asked about) bezel insert count towards a case's score. */
 const DIAL_LOOKAHEAD_WEIGHT = 0.6;
 const STRAP_LOOKAHEAD_WEIGHT = 0.3;
+const INSERT_LOOKAHEAD_WEIGHT = 0.4;
+/** Below this, a colour is a different colour: navy counts as blue, teal and green don't. */
+const MIN_COLOR_CREDIT = 0.5;
 
 const RELATED_STYLES: Record<WatchStyle, WatchStyle[]> = {
   diver: ["gmt", "sport"],
@@ -91,8 +115,14 @@ const STRAP_TYPES_BY_WATCH_STYLE: Record<WatchStyle, Partial<Record<Strap["type"
 
 interface ScoringContext {
   intent: DesignIntent;
-  /** The style to design towards: what the customer asked for, else the chosen case's style. */
+  /** The style to design towards: what the customer asked for, else the current design's. */
   style?: WatchStyle;
+  /** The current design's style: a follow-up edit stays in it unless the customer names another. */
+  baseStyle?: WatchStyle;
+  /** The current design is a GMT and the customer didn't ask for another style: keep the GMT. */
+  keepGmt: boolean;
+  /** Choosing for the least cost ("make it cheaper"): taste bonuses that cost money are dropped. */
+  lean: boolean;
   /** The design as chosen so far. */
   parts: ResolvedSpec;
   /** Id of the part this slot held before, if any, and how much keeping it is worth. */
@@ -113,6 +143,8 @@ export interface Candidate {
 
 export interface SlotChoice {
   slot: SlotKey;
+  /** The slot kept its current part because the request didn't concern it. */
+  locked: boolean;
   chosen: Candidate;
   /** Every option for the slot, best first, including the ones the rules ruled out. */
   ranked: Candidate[];
@@ -133,25 +165,37 @@ function styleAffinity(actual: WatchStyle, wanted: WatchStyle | undefined): numb
   return RELATED_STYLES[wanted].includes(actual) ? 0.4 : 0;
 }
 
+/** How well a part colour answers a requested colour, with no credit for a different colour. */
+function colorCredit(hex: string, color: ColorName): number {
+  const match = colorMatch(hex, color);
+  return match >= MIN_COLOR_CREDIT ? match : 0;
+}
+
 function bestMatch(hex: string, colors: ColorName[]): number {
-  return colors.length > 0 ? Math.max(...colors.map((color) => colorMatch(hex, color))) : 0;
+  return colors.length > 0 ? Math.max(...colors.map((color) => colorCredit(hex, color))) : 0;
 }
 
 function wantsGold(intent: DesignIntent): boolean {
   return Object.values(intent.colors).some((colors) => colors.includes("gold"));
 }
 
-function scoreCase(watchCase: WatchCase, { intent }: ScoringContext): number {
-  let score = 4 * styleAffinity(watchCase.style, intent.style);
+function scoreCase(watchCase: WatchCase, { intent, baseStyle, catalog }: ScoringContext): number {
+  const style = intent.style ?? baseStyle;
+  let score = 4 * styleAffinity(watchCase.style, style);
   if (intent.material && watchCase.material === intent.material) score += 12;
   if (intent.blackCase && watchCase.finish === "PVD black") score += 6;
   if (intent.displayCaseback && watchCase.caseback === "display") score += 4;
+  if (intent.noBezel && (watchCase.bezel === "none" || watchCase.bezel === "fixed")) score += 4;
+  if (intent.waterResistanceM !== undefined) {
+    const deepest = Math.max(...catalog.cases.map((c) => c.waterResistanceM));
+    if (watchCase.waterResistanceM >= Math.min(intent.waterResistanceM, deepest)) score += 4;
+  }
   if (intent.slim) score += 1.5 * (13.5 - watchCase.thicknessMm);
   const size = intent.size;
   if (size?.kind === "target") score -= 1.2 * Math.abs(watchCase.diameterMm - size.mm);
   if (size?.kind === "small") score += 0.8 * (42 - watchCase.diameterMm);
   if (size?.kind === "large") score += 0.8 * (watchCase.diameterMm - 38);
-  if (intent.style === "dress") {
+  if (style === "dress") {
     // Dress watches read best small, slim, shiny and without a tool bezel.
     score += 0.5 * (42 - watchCase.diameterMm) + 0.5 * (13.5 - watchCase.thicknessMm);
     if (watchCase.finish.includes("polished")) score += 1;
@@ -160,26 +204,33 @@ function scoreCase(watchCase: WatchCase, { intent }: ScoringContext): number {
   return score;
 }
 
-function scoreMovement(movement: Movement, { intent, style }: ScoringContext): number {
+function scoreMovement(movement: Movement, { intent, keepGmt, parts }: ScoringContext): number {
   const hasGmt = movement.complications.includes("gmt");
   let score = 0;
-  if (intent.gmt || style === "gmt") score += hasGmt ? 6 : 0;
+  if (intent.gmt || keepGmt) score += hasGmt ? 6 : 0;
   else if (hasGmt) score -= 4;
-  if (intent.date) score += movement.dateDisplay === intent.date ? 4 : 0;
-  else if (movement.dateDisplay === "date-3") score += 1;
+  if (intent.caliber) score += movement.caliber === intent.caliber ? 6 : 0;
+  // The dial is chosen first; a movement that turns exactly the window it has avoids a phantom date.
+  if (parts.dial) score += movement.dateDisplay === parts.dial.dateWindow ? 3 : 0;
+  else if (intent.date) score += movement.dateDisplay === intent.date ? 4 : 0;
   return score;
 }
 
-function scoreDial(dial: Dial, { intent, style }: ScoringContext): number {
+function scoreDial(dial: Dial, { intent, style, keepGmt }: ScoringContext): number {
   let score = 3 * styleAffinity(dial.style, style);
+  // A named colour outweighs style: "make the dial blue" on a field watch wants blue first. Gold,
+  // and colours asked for on the numerals or details, may come from the print.
   intent.colors.dial.forEach((color, i) => {
-    const onBase = colorMatch(dial.colorHex, color);
-    const onPrint = colorMatch(dial.printColorHex, color);
-    const match = color === "gold" ? Math.max(onBase, onPrint) : Math.max(onBase, 0.5 * onPrint);
-    score += (i === 0 ? 6 : 2) * match;
+    const onBase = colorCredit(dial.colorHex, color);
+    const onPrint = color === "gold" || intent.dialPrint.includes(color) ? colorCredit(dial.printColorHex, color) : 0;
+    score += (i === 0 ? 8 : 2) * Math.max(onBase, onPrint);
   });
-  if (intent.date && dial.dateWindow === intent.date) score += 3;
+  // "No date" is usually the point of the request; a date window is more often a nice-to-have,
+  // and a day-date window shows the date too.
+  if (intent.date && dial.dateWindow === intent.date) score += intent.date === "none" ? 4 : 3;
+  else if (intent.date === "date-3" && dial.dateWindow === "day-date-3") score += 2;
   if ((intent.gmt || style === "gmt") && dial.has24hScale) score += 2;
+  if (keepGmt && dial.has24hScale) score += 3;
   if (intent.lume && dial.lume !== "none") score += 1.5;
   if (intent.vintage && (dial.lume === "vintage" || dial.texture === "gloss")) score += 1.5;
   if (intent.indices && dial.indices === intent.indices) score += 2.5;
@@ -224,9 +275,11 @@ function scoreInsert(insert: BezelInsert, { intent, style, parts }: ScoringConte
   return score;
 }
 
-function scoreCrystal(crystal: Crystal, { intent, style }: ScoringContext): number {
-  // Sapphire unless the customer asks for mineral; a dome for dress and vintage looks, else flat.
-  let score = crystal.material === (intent.mineral ? "mineral" : "sapphire") ? 3 : 0;
+function scoreCrystal(crystal: Crystal, { intent, style, lean }: ScoringContext): number {
+  // Sapphire unless the customer asks for mineral or the least cost; a dome for dress and vintage
+  // looks, else flat.
+  const wanted = intent.mineral ? "mineral" : lean ? undefined : "sapphire";
+  let score = crystal.material === wanted ? 3 : 0;
   if (style === "dress") score += crystal.shape === "double-dome" ? 1.5 : 0;
   else if (intent.vintage) score += crystal.shape === "flat" ? 0 : 1.5;
   else score += crystal.shape === "flat" ? 1 : 0;
@@ -234,9 +287,10 @@ function scoreCrystal(crystal: Crystal, { intent, style }: ScoringContext): numb
 }
 
 function scoreStrap(strap: Strap, { intent, style, parts }: ScoringContext): number {
-  let score = intent.strapType === strap.type ? 6 : 0;
+  // The kind of strap asked for beats its colour: "a black leather strap" gets leather first.
+  let score = intent.strapType === strap.type ? 8 : 0;
   score += style ? (STRAP_TYPES_BY_WATCH_STYLE[style][strap.type] ?? 0) : 0;
-  if (intent.colors.strap.length > 0) score += 4 * bestMatch(strap.colorHex, intent.colors.strap);
+  if (intent.colors.strap.length > 0) score += 5 * bestMatch(strap.colorHex, intent.colors.strap);
   else if (strap.type === "leather" && style) score += colorMatch(strap.colorHex, LEATHER_COLOR_BY_STYLE[style]);
   else if (parts.dial && (strap.type === "rubber" || strap.type === "nato")) {
     score += colorSimilarity(strap.colorHex, parts.dial.colorHex);
@@ -280,7 +334,7 @@ function rankSlot(
     const part = findPart(partId, ctx.catalog);
     const relevant = option.issues.filter((issue) => issue.slots.every((s) => s === slot || decided.has(s)));
     const warnings = relevant.filter((issue) => issue.severity === "warning").length;
-    let score = (part ? preferenceScore(part, ctx) - part.costEur * ctx.costWeight : 0) - WARNING_PENALTY * warnings;
+    let score = (part ? preferenceScore(part, ctx) - part.costEur * ctx.costWeight : 0) - WARNING_PENALTY[slot] * warnings;
     if (partId === ctx.keepId) score += ctx.keepBonus;
     if (lookahead) score += lookahead(withPart(spec, slot, partId));
     // The error involving the fewest slots is the part's own limitation ("can't take printing"),
@@ -307,12 +361,25 @@ function bestCompatibleScore(slot: SlotKey, spec: WatchSpec, ctx: ScoringContext
 function caseLookahead(ctx: ScoringContext): (spec: WatchSpec) => number {
   return (spec) => {
     const parts = resolveSpec(spec, ctx.catalog);
-    const lookaheadCtx = { ...ctx, style: ctx.intent.style ?? parts.case?.style, parts, keepId: null, keepBonus: 0 };
+    const style = ctx.intent.style ?? ctx.baseStyle ?? parts.case?.style;
+    const lookaheadCtx = { ...ctx, style, parts, keepId: null, keepBonus: 0 };
+    const { colors, ceramic, countdown } = ctx.intent;
+    const insertWished = colors.bezel.length > 0 || ceramic || countdown;
     return (
       DIAL_LOOKAHEAD_WEIGHT * bestCompatibleScore("dialId", spec, lookaheadCtx) +
-      STRAP_LOOKAHEAD_WEIGHT * bestCompatibleScore("strapId", spec, lookaheadCtx)
+      STRAP_LOOKAHEAD_WEIGHT * bestCompatibleScore("strapId", spec, lookaheadCtx) +
+      (insertWished ? INSERT_LOOKAHEAD_WEIGHT * bestCompatibleScore("bezelInsertId", spec, lookaheadCtx) : 0)
     );
   };
+}
+
+export interface SelectionOptions {
+  /** Slots that keep `base`'s part: the request didn't concern them. */
+  locked?: ReadonlySet<SlotKey>;
+  /** Slots whose current part lacks something the customer asked for: keeping it is only a tie-break. */
+  unwanted?: ReadonlySet<SlotKey>;
+  /** Choose for the least cost, dropping taste bonuses that cost money. */
+  lean?: boolean;
 }
 
 /**
@@ -325,7 +392,11 @@ export function selectParts(
   intent: DesignIntent,
   costWeight: number,
   catalog: Catalog = CATALOG,
+  { locked, unwanted, lean = false }: SelectionOptions = {},
 ): Selection {
+  const current = resolveSpec(base, catalog);
+  const baseStyle = current.case?.style;
+  const keepGmt = Boolean(current.movement?.complications.includes("gmt")) && (!intent.style || intent.style === "gmt");
   let spec = start;
   const decided = new Set<SlotKey>();
   const choices: SlotChoice[] = [];
@@ -333,16 +404,23 @@ export function selectParts(
     const parts = resolveSpec(spec, catalog);
     const ctx: ScoringContext = {
       intent,
-      style: intent.style ?? parts.case?.style,
+      style: intent.style ?? baseStyle ?? parts.case?.style,
+      baseStyle,
+      keepGmt,
+      lean,
       parts,
       keepId: base[slot],
-      keepBonus: KEEP_BONUS[slot],
+      keepBonus: unwanted?.has(slot) ? UNWANTED_KEEP_BONUS : KEEP_BONUS[slot],
       costWeight,
       catalog,
     };
-    const ranked = rankSlot(slot, spec, decided, ctx, slot === "caseId" ? caseLookahead(ctx) : undefined);
-    const chosen = ranked.find((candidate) => !candidate.blocker) ?? ranked[0];
-    choices.push({ slot, chosen, ranked });
+    const isLocked = locked?.has(slot) ?? false;
+    const lookahead = slot === "caseId" && !isLocked ? caseLookahead(ctx) : undefined;
+    const ranked = rankSlot(slot, spec, decided, ctx, lookahead);
+    const chosen = isLocked
+      ? (ranked.find((candidate) => candidate.partId === base[slot]) ?? ranked[0])
+      : (ranked.find((candidate) => !candidate.blocker) ?? ranked[0]);
+    choices.push({ slot, locked: isLocked, chosen, ranked });
     spec = withPart(spec, slot, chosen.partId);
     decided.add(slot);
   }

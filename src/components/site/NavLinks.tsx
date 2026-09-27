@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+// Customer pages only. The workshop (/orders) is bookmarked by the workshop, not shown to customers.
 const LINKS = [
   { href: "/", label: "Design" },
   { href: "/how-it-works", label: "How it works" },
-  { href: "/orders", label: "Workshop" },
 ] as const;
 
 function isActive(pathname: string, href: string): boolean {
@@ -24,7 +24,7 @@ export function NavLinks() {
             <Link
               href={href}
               aria-current={active ? "page" : undefined}
-              className={`rounded-full px-3 py-1.5 transition-colors ${
+              className={`inline-block rounded-full px-3 py-2.5 transition-colors sm:py-1.5 ${
                 active ? "bg-ink text-paper" : "text-ink-soft hover:bg-surface-muted hover:text-ink"
               }`}
             >

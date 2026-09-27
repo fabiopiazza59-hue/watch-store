@@ -1,5 +1,16 @@
+import { dateWheelColour } from "@/domain/catalog";
+import {
+  arabicNumeralSize,
+  DIAL_PRINT_MM,
+  type DialPrintZones,
+  dialPrintZones,
+  dialTextLine,
+  indexInnerRadius,
+  layoutDialText,
+  numeralLumeDots,
+} from "@/domain/dialTextFit";
 import type { Dial, WatchCase } from "@/domain/types";
-import { caseMetal, colorName, darken, GOLD, isDark, lighten, luminance, lumeDayColor, metalFrom, safeHex, SILVER } from "./color";
+import { caseMetal, colorName, darken, GOLD, isDark, lighten, lumeDayColor, metalFrom, safeHex, SILVER } from "./color";
 import { circle, divisions, fmt, polar, positive, radialTicks, ring, wedge } from "./geometry";
 import type { WatchLayout } from "./layout";
 import { PLACEHOLDER, SANS, SERIF, url, type IdFor } from "./svg";
@@ -23,21 +34,23 @@ const SATURDAY_BLUE = "#2456a6";
 const HOURS = Array.from({ length: 12 }, (_, i) => i + 1);
 const hourAngle = (hour: number) => hour * 30;
 
-/** Marker and numeral sizes on a standard 28.5mm dial, in mm; they scale with the dial. */
-const MARKER_LENGTH = 2.9;
-const ROMAN_SIZE = 2.2;
-const LUME_DOT_RING = 1.1;
+/** Marker and numeral sizes on a standard 28.5mm dial, in mm (shared with the rules engine); they scale with the dial. */
+const MARKER_LENGTH = DIAL_PRINT_MM.markerLength;
+const ROMAN_SIZE = DIAL_PRINT_MM.romanSize;
+const LUME_DOT_RING = DIAL_PRINT_MM.lumeDotRing;
 
 interface DialLayerProps {
   watchCase?: WatchCase;
   dial?: Dial;
   dialText: string;
+  /** False for text that could never be printed (see isPrintableDialText): only an outline of its place is drawn. */
+  dialTextPrintable: boolean;
   layout: WatchLayout;
   idFor: IdFor;
 }
 
 /** Everything seen through the opening: case flange, dial and its print, date window, chapter ring. */
-export function DialLayer({ watchCase, dial, dialText, layout, idFor }: DialLayerProps) {
+export function DialLayer({ watchCase, dial, dialText, dialTextPrintable, layout, idFor }: DialLayerProps) {
   const { openingR, chapterRing } = layout;
 
   return (
@@ -51,7 +64,7 @@ export function DialLayer({ watchCase, dial, dialText, layout, idFor }: DialLaye
         {watchCase && <Flange watchCase={watchCase} layout={layout} idFor={idFor} />}
         {dial ? (
           <g transform={layout.dialTurnDeg ? `rotate(${fmt(layout.dialTurnDeg)})` : undefined}>
-            <DialFace dial={dial} dialText={dialText} layout={layout} idFor={idFor} />
+            <DialFace dial={dial} dialText={dialText} dialTextPrintable={dialTextPrintable} layout={layout} idFor={idFor} />
           </g>
         ) : (
           <circle r={fmt(layout.dialSeatR)} {...PLACEHOLDER} fillOpacity={1} />
@@ -78,33 +91,16 @@ function Flange({ watchCase, layout, idFor }: { watchCase: WatchCase; layout: Wa
   );
 }
 
-/** Radii of the printed zones, from the edge of the dial inwards. */
-interface DialZones {
-  /** Dial diameter relative to the standard 28.5mm; print sizes scale by it. */
-  s: number;
-  dialR: number;
-  track?: { outer: number; inner: number };
-  scale24?: { outer: number; inner: number };
-  /** Outer end of the hour markers. */
-  indexOuter: number;
-}
+/** Radii of the printed zones, from the edge of the dial inwards (the rules engine uses the same ones). */
+type DialZones = DialPrintZones;
 
 function dialZones(dial: Dial, layout: WatchLayout): DialZones {
-  const dialR = positive(dial.diameterMm, layout.dialSeatR * 2) / 2;
-  const s = (dialR * 2) / 28.5;
-  // Under a chapter ring the dial's outer 0.6mm is hidden and the minute track lives on the ring.
-  const edge = layout.chapterRing ? dialR - 0.6 : dialR;
-  const track = layout.chapterRing ? undefined : { outer: edge - 0.35 * s, inner: edge - 1.5 * s };
-  let next = track ? track.inner - 0.4 * s : edge - 0.4 * s;
-  let scale24;
-  if (dial.has24hScale) {
-    scale24 = { outer: next, inner: next - 1.6 * s };
-    next = scale24.inner - 0.35 * s;
-  }
-  return { s, dialR, track, scale24, indexOuter: next };
+  return dialPrintZones(positive(dial.diameterMm, layout.dialSeatR * 2), dial.has24hScale, Boolean(layout.chapterRing));
 }
 
-function DialFace({ dial, dialText, layout, idFor }: { dial: Dial; dialText: string; layout: WatchLayout; idFor: IdFor }) {
+type DialFaceProps = Pick<DialLayerProps, "dialText" | "dialTextPrintable" | "layout" | "idFor"> & { dial: Dial };
+
+function DialFace({ dial, dialText, dialTextPrintable, layout, idFor }: DialFaceProps) {
   const zones = dialZones(dial, layout);
   const base = safeHex(dial.colorHex, "#1c1c1c");
   const print = safeHex(dial.printColorHex, isDark(base) ? "#f2f2ee" : "#1c1c1c");
@@ -117,8 +113,8 @@ function DialFace({ dial, dialText, layout, idFor }: { dial: Dial; dialText: str
       {zones.track && <MinuteTrack dial={dial} track={zones.track} s={zones.s} print={print} />}
       {zones.scale24 && <Scale24 band={zones.scale24} s={zones.s} print={print} skipSix={hasDate} />}
       <Indices dial={dial} zones={zones} print={print} hasDate={hasDate} idFor={idFor} />
-      {hasDate && <DateWindow dial={dial} base={base} print={print} idFor={idFor} />}
-      <DialText text={dialText} dial={dial} zones={zones} print={print} />
+      {hasDate && <DateWindow dial={dial} print={print} idFor={idFor} />}
+      <DialText text={dialText} printable={dialTextPrintable} dial={dial} zones={zones} print={print} />
     </g>
   );
 }
@@ -403,12 +399,13 @@ function AppliedBatons({ dial, zones, print, hasDate, idFor }: IndicesProps) {
  */
 function arabicPrint(dial: Dial, print: string, s: number) {
   const lume = lumeDayColor(dial.lume);
-  const lumedNumerals = lume !== undefined && luminance(print) > 0.45;
+  // Light numerals are lumed themselves; dark ones get a ring of lume dots (as the rules engine measures).
+  const dots = lume !== undefined && numeralLumeDots(dial);
   return {
     lume,
-    fontSize: (dial.style === "pilot" ? 3.1 : 2.6) * s,
-    fill: lumedNumerals ? lume : print,
-    dots: lume !== undefined && !lumedNumerals,
+    fontSize: arabicNumeralSize(dial, s),
+    fill: lume !== undefined && !dots ? lume : print,
+    dots,
   };
 }
 
@@ -476,28 +473,13 @@ function RomanNumerals({ zones, print, hasDate }: IndicesProps) {
   );
 }
 
-/** Radius where the hour markers end towards the centre, used to place the dial text. */
-function indexInner(dial: Dial, zones: DialZones, print: string): number {
-  const { s, indexOuter } = zones;
-  switch (dial.indices) {
-    case "arabic": {
-      const { fontSize, dots } = arabicPrint(dial, print, s);
-      return indexOuter - fontSize * 1.25 - (dots ? LUME_DOT_RING * s : 0);
-    }
-    case "roman":
-      return indexOuter - ROMAN_SIZE * s;
-    default:
-      return indexOuter - MARKER_LENGTH * s;
-  }
-}
-
-function DateWindow({ dial, base, print, idFor }: { dial: Dial; base: string; print: string; idFor: IdFor }) {
+function DateWindow({ dial, print, idFor }: { dial: Dial; print: string; idFor: IdFor }) {
   const dayDate = dial.dateWindow === "day-date-3";
   const left = DATE_CENTRE_X - DATE_WIDTH / 2 - (dayDate ? DAY_WIDTH : 0);
   const width = DATE_WIDTH + (dayDate ? DAY_WIDTH : 0);
   const top = -WINDOW_HEIGHT / 2;
-  // Workshops fit a black or white date wheel to suit the dial.
-  const darkWheel = isDark(base);
+  // Workshops fit a black or white date wheel to suit the dial; the build sheet orders the same one.
+  const darkWheel = dateWheelColour(dial) === "black";
   const wheel = darkWheel ? "#171717" : "#f7f6f1";
   const ink = darkWheel ? "#f0f0eb" : "#161616";
   // Applied dials frame the aperture in metal; printed ones outline it in the print colour.
@@ -559,19 +541,46 @@ function DateWindow({ dial, base, print, idFor }: { dial: Dial; base: string; pr
   );
 }
 
-/** Customer's personal line, small capitals above 6 o'clock. */
-function DialText({ text, dial, zones, print }: { text: string; dial: Dial; zones: DialZones; print: string }) {
-  const line = text.trim().toUpperCase();
+interface DialTextProps {
+  text: string;
+  printable: boolean;
+  dial: Dial;
+  zones: DialZones;
+  print: string;
+}
+
+/**
+ * Customer's personal line, small capitals above 6 o'clock. A long line is set smaller, never
+ * squeezed: a printer keeps the letters' proportions. Below the smallest legible size it stays at
+ * that size, and the rules engine's dial-text warning (same layout) asks for fewer characters.
+ */
+function DialText({ text, printable, dial, zones, print }: DialTextProps) {
+  const line = dialTextLine(text);
   if (!line) return null;
-  const { s } = zones;
-  const inner = indexInner(dial, zones, print);
-  const y = inner * 0.66;
-  const fontSize = 1.15 * s;
-  const tracking = 0.2 * s;
-  // Keep long lines inside the markers: squeeze rather than overflow.
-  const available = 2 * Math.sqrt(Math.max(inner * inner - y * y, 0)) * 0.8;
-  const estimated = line.length * fontSize * 0.68 + (line.length - 1) * tracking;
-  const squeeze = estimated > available ? { textLength: fmt(available), lengthAdjust: "spacingAndGlyphs" as const } : {};
+  const { y, available, fullWidth, scale, fontSize, letterSpacing } = layoutDialText(
+    indexInnerRadius(dial, zones),
+    zones.s,
+    line.length,
+  );
+
+  if (!printable) {
+    const width = Math.min(fullWidth * scale, available);
+    const height = fontSize * 1.4;
+    return (
+      <rect
+        data-dial-text="not-printable"
+        x={fmt(-width / 2)}
+        y={fmt(y - height / 2)}
+        width={fmt(width)}
+        height={fmt(height)}
+        rx={fmt(height / 2)}
+        fill="none"
+        stroke={PLACEHOLDER.stroke}
+        strokeWidth={PLACEHOLDER.strokeWidth}
+        strokeDasharray={PLACEHOLDER.strokeDasharray}
+      />
+    );
+  }
   return (
     <text
       x="0"
@@ -580,10 +589,9 @@ function DialText({ text, dial, zones, print }: { text: string; dial: Dial; zone
       fontFamily={SANS}
       fontWeight={600}
       fontSize={fmt(fontSize)}
-      letterSpacing={fmt(tracking)}
+      letterSpacing={fmt(letterSpacing)}
       textAnchor="middle"
       dominantBaseline="central"
-      {...squeeze}
     >
       {line}
     </text>

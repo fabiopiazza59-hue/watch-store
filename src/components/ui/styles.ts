@@ -13,9 +13,10 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   ghost: "text-ink-soft hover:bg-surface-muted hover:text-ink",
 };
 
+// Taller on phones, where they are tapped.
 const BUTTON_SIZES: Record<ButtonSize, string> = {
-  sm: "h-8 px-3 text-sm",
-  md: "h-10 px-4 text-sm",
+  sm: "h-10 px-3 text-sm sm:h-8",
+  md: "h-11 px-4 text-sm sm:h-10",
   lg: "h-12 px-6 text-base",
 };
 
@@ -25,7 +26,7 @@ export function buttonClass(variant: ButtonVariant = "primary", size: ButtonSize
 
 export const cardClass = "rounded-xl border border-line bg-surface";
 
-const CHIP_BASE = "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors";
+const CHIP_BASE = "inline-flex items-center gap-1.5 rounded-full border px-3 py-2.5 text-sm transition-colors sm:py-1.5";
 
 export function chipClass(selected = false): string {
   return selected
@@ -39,5 +40,5 @@ const INPUT_BASE =
   "w-full rounded-lg border bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus-visible:border-brass-ink";
 
 export function inputClass(invalid = false): string {
-  return `${INPUT_BASE} ${invalid ? "border-danger" : "border-line-strong"}`;
+  return `${INPUT_BASE} ${invalid ? "border-danger" : "border-control-border"}`;
 }

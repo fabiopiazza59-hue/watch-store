@@ -2,7 +2,8 @@
 
 /*
  * Atelier palette: warm paper, deep ink, one brass accent. Status colours are muted so the
- * feasibility verdict reads clearly without shouting. Every token is redefined for dark mode.
+ * feasibility verdict reads clearly without shouting. Every token is redefined for dark mode,
+ * on screen only: printed build sheets always use the light palette.
  */
 :root {
   --paper: #f6f3ee;
@@ -13,6 +14,8 @@
   --ink-faint: #6c635a;
   --line: #e3dbcf;
   --line-strong: #cabdab;
+  /* Edges of form controls: at least 3:1 against surface and paper (WCAG 1.4.11). */
+  --control-border: #8f8272;
   --brass: #b08d57;
   --brass-ink: #7a5a2b;
   --brass-soft: #f1e7d6;
@@ -27,7 +30,7 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
+@media screen and (prefers-color-scheme: dark) {
   :root {
     --paper: #15130f;
     --surface: #1c1915;
@@ -37,6 +40,7 @@
     --ink-faint: #a09585;
     --line: #342f28;
     --line-strong: #4b433a;
+    --control-border: #6f665a;
     --brass: #c9a46c;
     --brass-ink: #dcbb85;
     --brass-soft: #2e2619;
@@ -61,6 +65,7 @@
   --color-ink-faint: var(--ink-faint);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
+  --color-control-border: var(--control-border);
   --color-brass: var(--brass);
   --color-brass-ink: var(--brass-ink);
   --color-brass-soft: var(--brass-soft);
@@ -112,7 +117,22 @@ body {
   }
 }
 
+/*
+ * Below xl the undo toast sits at the bottom of the screen, where a phone's keyboard pushes the text
+ * field being typed in: it steps aside while one has focus.
+ */
+@media (width < 80rem) {
+  body:has(:is(input:not([type="radio"], [type="checkbox"]), textarea, select):focus) .undo-toast {
+    display: none;
+  }
+}
+
 /* Build sheets are printed at the bench: plain white paper, ink text, no screen chrome. */
+@page {
+  size: A4;
+  margin: 12mm;
+}
+
 @media print {
   :root {
     --paper: #fff;

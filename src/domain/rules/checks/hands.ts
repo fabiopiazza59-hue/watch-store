@@ -44,7 +44,7 @@ export function handFit({ parts }: RuleContext): Finding[] {
 }
 
 /** `gmt-hand`: a GMT movement gets a GMT hand, and a GMT hand gets a pinion of its size. */
-export function gmtHand({ parts }: RuleContext): Finding[] {
+export function gmtHand({ parts, catalog }: RuleContext): Finding[] {
   const { movement, hands } = parts;
   if (!movement || !hands) return [];
   const handsName = quote(hands.name);
@@ -69,9 +69,12 @@ export function gmtHand({ parts }: RuleContext): Finding[] {
     );
   }
   if (hands.includesGmt && gmtPinion === undefined) {
+    const gmtCalibers = catalog.movements.filter(isGmtMovement).map((m) => `${m.caliber} GMT`);
+    const choose = gmtCalibers.length > 0 ? `Choose the ${listJoin(gmtCalibers)} movement or hands` : "Choose hands";
     return report(
       "no-pinion",
-      `The ${handsName} set includes a GMT hand, but the ${movement.caliber} has no GMT pinion to mount it on.`,
+      `The ${handsName} set includes a GMT hand, but the ${movement.caliber} has no fourth (24-hour) hand to fit it to. ` +
+        `${choose} without a GMT hand.`,
     );
   }
   if (gmtPinion !== undefined && gmtHole !== undefined && outOfTolerance(gmtHole, gmtPinion, HAND_HOLE_TOLERANCE_MM)) {
@@ -128,21 +131,61 @@ export function handLength({ parts }: RuleContext): Finding[] {
   return findings;
 }
 
+/**
+ * Seconds-hand lengths that clear the crystal when an NH34 sits in a case made for three-hand movements
+ * (Lucius Atelier's NH34 clearance table): under a double-dome, up to 12.5 mm; under a flat crystal, one
+ * case maker's advice is under 12 mm, and the table has no length that clears. Single-domed crystals
+ * aren't in the table, so they get the flat crystal's stricter limit.
+ */
+export const NH34_SECONDS_HAND_MAX_MM = { doubleDome: 12.5, flatUnder: 12 } as const;
+
 /** `hand-clearance`: a GMT's four-hand stack has room under the crystal. */
 export function handClearance({ parts }: RuleContext): Finding[] {
-  const { movement, case: watchCase } = parts;
+  const { movement, case: watchCase, hands, crystal } = parts;
   if (!movement || !watchCase || !isGmtMovement(movement)) return [];
-  if (!isLess(watchCase.handClearanceMm, MIN_GMT_STACK_CLEARANCE_MM)) return [];
-  return [
-    finding({
-      ruleId: "hand-clearance",
-      severity: "warning",
-      message:
-        `The ${quote(watchCase.name)} case leaves ${mm(watchCase.handClearanceMm)} above the dial for the hands, ` +
-        `and a GMT's four-hand stack wants at least ${mm(MIN_GMT_STACK_CLEARANCE_MM)}. It can be built, but the ` +
-        `hands may touch each other or the crystal, so it needs extra care when fitting.`,
-      slots: ["caseId", "movementId"],
-      remedies: swaps("caseId"),
-    }),
-  ];
+  const findings: Finding[] = [];
+
+  if (isLess(watchCase.handClearanceMm, MIN_GMT_STACK_CLEARANCE_MM)) {
+    findings.push(
+      finding({
+        ruleId: "hand-clearance",
+        variant: "tight-stack",
+        severity: "warning",
+        message:
+          `The ${quote(watchCase.name)} case leaves ${mm(watchCase.handClearanceMm)} above the dial for the hands, ` +
+          `and a GMT's four-hand stack wants at least ${mm(MIN_GMT_STACK_CLEARANCE_MM)}. It can be built, but the ` +
+          `hands may touch each other or the crystal, so it needs extra care when fitting.`,
+        slots: ["caseId", "movementId"],
+        remedies: swaps("caseId"),
+      }),
+    );
+  }
+
+  if (hands && crystal && !watchCase.nh34ReadyCrystals?.includes(crystal.shape)) {
+    const seconds = hands.lengthsMm.seconds;
+    const doubleDome = crystal.shape === "double-dome";
+    const tooLong = doubleDome
+      ? isGreater(seconds, NH34_SECONDS_HAND_MAX_MM.doubleDome)
+      : !isLess(seconds, NH34_SECONDS_HAND_MAX_MM.flatUnder);
+    if (tooLong) {
+      const limit = doubleDome
+        ? `even a double-dome crystal only clears a seconds hand up to ${mm(NH34_SECONDS_HAND_MAX_MM.doubleDome)}`
+        : `a seconds hand has to be shorter than ${mm(NH34_SECONDS_HAND_MAX_MM.flatUnder)} unless the crystal is double-domed`;
+      findings.push(
+        finding({
+          ruleId: "hand-clearance",
+          variant: "seconds-crystal",
+          severity: "warning",
+          message:
+            `The ${quote(hands.name)} seconds hand is ${mm(seconds)} long, and the ${movement.caliber}'s GMT wheel ` +
+            `lifts the hands about 0.4 mm. The ${quote(watchCase.name)} case isn't sold NH34-ready with the ` +
+            `${quote(crystal.name)} crystal, and in a case made for three-hand movements ${limit}. It can be built, ` +
+            `but the seconds hand may brush the crystal and stop the watch.`,
+          slots: ["crystalId", "handsId", "caseId", "movementId"],
+          remedies: swaps("crystalId", "handsId", "caseId"),
+        }),
+      );
+    }
+  }
+  return findings;
 }

@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { compactText, normalizeText, reviewText, words } from "./text";
+import { compactText, normalizePersonalizationText, normalizeText, reviewText, words } from "./text";
 
 describe("normalisation", () => {
   it("lowercases, strips accents and collapses whitespace", () => {
     expect(normalizeText("  Genève \t  SWISS\n Söhne ")).toBe("geneve swiss sohne");
+  });
+
+  it("folds compatibility forms such as fullwidth letters and ligatures to plain letters", () => {
+    expect(normalizeText("ＲＯＬＥＸ")).toBe("rolex");
+    expect(normalizeText("Ｓｗｉｓｓ\u3000Ｍａｄｅ")).toBe("swiss made");
+    expect(normalizeText("ﬁeld")).toBe("field");
   });
 
   it("splits words on punctuation but keeps apostrophes inside words", () => {
@@ -39,6 +45,13 @@ describe("watch trademarks", () => {
     ["Patek", "Patek Philippe"],
     ["Mont Blanc", "Montblanc"],
     ["Submariner", "Submariner"],
+    ["ＲＯＬＥＸ", "Rolex"],
+    ["Ｏｍｅｇａ", "Omega"],
+    ["Heuer", "TAG Heuer"],
+    ["TAG Heuer", "TAG Heuer"],
+    ["Lange & Soehne", "A. Lange & Söhne"],
+    ["Lange und Soehne", "A. Lange & Söhne"],
+    ["Glashuette Original", "Glashütte Original"],
   ])("catches %j as %s", (text, brand) => {
     expect(reviewText(text).trademarks).toContain(brand);
   });
@@ -58,6 +71,8 @@ describe("watch trademarks", () => {
     "Radio",
     "Genevieve",
     "Grandpa's watch",
+    "Theuer",
+    "Familie Scheuer",
   ])("does not flag the ordinary text %j", (text) => {
     const review = reviewText(text);
     expect(review.trademarks).toEqual([]);
@@ -81,6 +96,7 @@ describe("protected Swiss indications", () => {
     ["GENEVE", "Genève"],
     ["Geneva", "Genève"],
     ["Genf", "Genève"],
+    ["Ｓｗｉｓｓ Ｍａｄｅ", "Swiss"],
   ])("catches %j as %s", (text, indication) => {
     expect(reviewText(text).protectedIndications).toContain(indication);
   });
@@ -89,6 +105,12 @@ describe("protected Swiss indications", () => {
 describe("characters and length", () => {
   it("allows letters (accented too), digits, spaces and . , ' & -", () => {
     expect(reviewText("Zoë-Ångström & Co., 1953 'ok'").disallowedCharacters).toEqual([]);
+  });
+
+  it("refuses compatibility forms, which would be printed as typed", () => {
+    expect(reviewText("ﬁeld").disallowedCharacters).toEqual(["ﬁ"]);
+    expect(reviewText("ＲＯＬＥＸ").disallowedCharacters).toEqual(["Ｒ", "Ｏ", "Ｌ", "Ｅ", "Ｘ"]);
+    expect(reviewText("No²").disallowedCharacters).toEqual(["²"]);
   });
 
   it("lists each disallowed character once, in order", () => {
@@ -101,5 +123,19 @@ describe("characters and length", () => {
   it("counts characters of the trimmed text, composed accents as one", () => {
     expect(reviewText("  abc  ").length).toBe(3);
     expect(reviewText("é").length).toBe(1);
+  });
+});
+
+describe("normalizePersonalizationText", () => {
+  it("turns typographic apostrophes and dashes into the ASCII marks the review accepts", () => {
+    expect(normalizePersonalizationText("Grandpa’s watch")).toBe("Grandpa's watch");
+    expect(normalizePersonalizationText("‘Anna’ ʼ92 1953–2026 — Tom")).toBe("'Anna' '92 1953-2026 - Tom");
+    expect(reviewText(normalizePersonalizationText("Grandpa’s watch")).disallowedCharacters).toEqual([]);
+  });
+
+  it("leaves everything else as typed, for the review to judge", () => {
+    expect(normalizePersonalizationText("Zoë-Ångström & Co.")).toBe("Zoë-Ångström & Co.");
+    expect(normalizePersonalizationText("“Carpe diem”")).toBe("“Carpe diem”");
+    expect(normalizePersonalizationText("ＲＯＬＥＸ")).toBe("ＲＯＬＥＸ");
   });
 });

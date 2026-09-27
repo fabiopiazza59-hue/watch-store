@@ -8,6 +8,9 @@ import {
 import { CATALOG, resolveSpec, TEMPLATES } from "./catalog";
 import type { BuildSheet, Catalog, WatchSpec } from "./types";
 
+const DARK = "#15171a";
+const LIGHT = "#efe6d2";
+
 // Real catalogue parts with every field the build sheet branches on pinned, so these tests don't move
 // with the catalogue.
 function fixtureCatalog(): Catalog {
@@ -64,6 +67,7 @@ function fixtureCatalog(): Catalog {
         screwDownCrown: true,
         crownPosition: 3.8,
         waterResistanceM: 300,
+        waterResistanceEstimated: undefined,
         handClearanceMm: 1.8,
         finish: "brushed & polished",
         dataNotes: "Crystal seat is an estimate.",
@@ -78,6 +82,7 @@ function fixtureCatalog(): Catalog {
         screwDownCrown: true,
         crownPosition: 3,
         waterResistanceM: 200,
+        waterResistanceEstimated: undefined,
         handClearanceMm: 1.7,
         dataNotes: undefined,
       },
@@ -92,15 +97,17 @@ function fixtureCatalog(): Catalog {
         screwDownCrown: false,
         crownPosition: 3,
         waterResistanceM: 50,
+        waterResistanceEstimated: true,
         finish: "polished",
         dataNotes: undefined,
       },
     ],
     dials: [
-      { ...dial, id: "dial-date", name: "Test Date", dateWindow: "date-3", has24hScale: false, lume: "green", dataNotes: undefined },
-      { ...dial, id: "dial-daydate", name: "Test Day-Date", dateWindow: "day-date-3", has24hScale: false, dataNotes: undefined },
-      { ...dial, id: "dial-nodate", name: "Test No-Date", dateWindow: "none", has24hScale: false, lume: "none", dataNotes: undefined },
-      { ...dial, id: "dial-gmt", name: "Test GMT Dial", dateWindow: "date-3", has24hScale: true, centerHoleMm: 2.8, dataNotes: undefined },
+      { ...dial, id: "dial-date", name: "Test Date", dateWindow: "date-3", colorHex: DARK, has24hScale: false, lume: "green", dataNotes: undefined },
+      { ...dial, id: "dial-date-light", name: "Test Light Date", dateWindow: "date-3", colorHex: LIGHT, has24hScale: false, dataNotes: undefined },
+      { ...dial, id: "dial-daydate", name: "Test Day-Date", dateWindow: "day-date-3", colorHex: DARK, has24hScale: false, dataNotes: undefined },
+      { ...dial, id: "dial-nodate", name: "Test No-Date", dateWindow: "none", colorHex: LIGHT, has24hScale: false, lume: "none", dataNotes: undefined },
+      { ...dial, id: "dial-gmt", name: "Test GMT Dial", dateWindow: "date-3", colorHex: DARK, has24hScale: true, centerHoleMm: 2.8, dataNotes: undefined },
     ],
     hands: [
       { ...hands, id: "hands", name: "Test Hands", includesGmt: false, lume: "green", dataNotes: undefined },
@@ -114,7 +121,10 @@ function fixtureCatalog(): Catalog {
         dataNotes: undefined,
       },
     ],
-    crystals: [{ ...CATALOG.crystals[0], id: "crystal", name: "Test Crystal", arCoating: "inner", dataNotes: undefined }],
+    crystals: [
+      { ...CATALOG.crystals[0], id: "crystal", name: "Test Crystal", shape: "flat", arCoating: "inner", dataNotes: undefined },
+      { ...CATALOG.crystals[0], id: "crystal-domed", name: "Test Domed Crystal", shape: "double-dome", arCoating: "both", dataNotes: undefined },
+    ],
     bezelInserts: [
       { ...insert, id: "insert-dive", name: "Test Dive Insert", scale: "dive-60", material: "aluminium", outerMm: 38, innerMm: 30.6, dataNotes: undefined },
       { ...insert, id: "insert-gmt", name: "Test GMT Insert", scale: "gmt-24", material: "ceramic", outerMm: 38, innerMm: 30.6, dataNotes: undefined },
@@ -209,6 +219,14 @@ describe("createBuildSheet", () => {
       expect(allText(result)).not.toMatch(/undefined|NaN/);
     }
   });
+
+  it("pressure-tests the Gilt Compact Diver at its maker's 5 bar, not above", () => {
+    const template = TEMPLATES.find((t) => t.id === "tpl-gilt-compact-diver");
+    const result = createBuildSheet(template!.spec);
+    expect(step(result, "Pressure test")?.detail).toContain("dry-test it at 5 bar");
+    expect(step(result, "Pressure test")?.cautions.join(" ")).toContain("hasn't confirmed the 50m rating");
+    expect(qc(result, "qc-water")?.criterion).toMatch(/^No leak when tested at 5 bar/);
+  });
 });
 
 describe("bill of materials", () => {
@@ -237,6 +255,28 @@ describe("bill of materials", () => {
 
   it("leaves out an empty insert slot", () => {
     expect(sheet(DRESS).bom.map((line) => line.slot)).not.toContain("bezelInsertId");
+  });
+
+  it("treats an empty insert id as no insert, not as a missing part", () => {
+    const result = sheet({ ...DRESS, bezelInsertId: "" });
+    expect(result.bom.map((line) => line.slot)).not.toContain("bezelInsertId");
+    expect(result.notes.some((note) => note.startsWith("Not buildable"))).toBe(false);
+  });
+
+  it("names the date wheel colour and, for a day-date, the day wheel for the case's crown", () => {
+    const movementLine = (spec: WatchSpec) => sheet(spec).bom.find((line) => line.slot === "movementId")?.name;
+    expect(movementLine(DIVER)).toBe("Test NH35, with a black date wheel");
+    expect(movementLine({ ...DIVER, dialId: "dial-date-light" })).toBe("Test NH35, with a white date wheel");
+    expect(movementLine({ ...DIVER, dialId: "dial-nodate" })).toBe("Test NH35");
+    expect(movementLine(DRESS)).toBe("Test NH38");
+
+    const dayDate = { ...DIVER, movementId: "mv-daydate", dialId: "dial-daydate" };
+    expect(movementLine(dayDate)).toContain("black day and date wheels");
+    expect(movementLine(dayDate)).toContain("'4 o'clock crown' day wheel");
+    expect(movementLine({ ...dayDate, caseId: "case-gmt" })).toContain("the standard day wheel (for a 3 o'clock crown)");
+    expect(step(sheet(dayDate), "Check the parts in against this sheet")?.detail).toContain(
+      "Check the NH36A came with black day and date wheels and the '4 o'clock crown' day wheel",
+    );
   });
 
   it("adds a line per personalization service", () => {
@@ -269,7 +309,8 @@ describe("steps follow the actual parts", () => {
     expect(hands?.detail).toMatch(/Press the 24h hand first: it has the largest hole \(2\.2mm\)/);
     expect(hands?.detail.indexOf("24h hand")).toBeLessThan(hands?.detail.indexOf("hour hand at 12") ?? 0);
     expect(hands?.cautions.join(" ")).toContain("estimated 1.7mm");
-    expect(step(gmt, "Check clearances and the calendar before casing")?.detail).toContain("24h hand should jump one hour");
+    const beforeCasing = step(gmt, "Check clearances and the calendar before casing");
+    expect(beforeCasing?.detail).toContain("24h hand should jump one hour");
     expect(step(gmt, "Check the parts in against this sheet")?.detail).toContain("dial's centre hole: it should be about 2.8mm");
 
     const diver = sheet(DIVER);
@@ -277,23 +318,79 @@ describe("steps follow the actual parts", () => {
     expect(allText(diver)).not.toMatch(/24h hand|GMT/);
   });
 
-  it("covers the day wheel and Seiko's day-date quick-set window only for day-date builds", () => {
+  it("tests the 24h-hand quick-set at 6 o'clock, outside the NH34's no-quick-set window", () => {
+    const beforeCasing = step(sheet(GMT), "Check clearances and the calendar before casing");
+    const detail = beforeCasing?.detail ?? "";
+    expect(detail.indexOf("turn the hands on to about 6 o'clock")).toBeGreaterThan(-1);
+    expect(detail.indexOf("6 o'clock")).toBeLessThan(detail.indexOf("first position"));
+    expect(beforeCasing?.cautions.join(" ")).toContain("Never use the date or 24h-hand quick-set between 9 p.m. and 3 a.m.");
+    expect(step(sheet(DIVER), "Check clearances and the calendar before casing")?.cautions.join(" ")).toContain(
+      "Never use the calendar quick-set",
+    );
+  });
+
+  it("uses the quick-set window from the movement maker's guide for each calibre", () => {
     const dayDate = sheet({ ...DIVER, movementId: "mv-daydate", dialId: "dial-daydate" });
     expect(step(dayDate, "Fit the dial")?.detail).toContain("day-wheel variant");
     expect(allText(dayDate)).toContain("between 9 p.m. and 4 a.m.");
     expect(step(dayDate, "Set the watch and fit the strap")?.detail).toContain("clockwise sets the day");
 
     const date = sheet(DIVER);
-    expect(allText(date)).toContain("between 9 p.m. and 1 a.m.");
+    expect(allText(date)).toContain("between 9 p.m. and 4 a.m. (SII's NH3 technical guide)");
     expect(allText(date)).not.toContain("day-wheel");
     expect(allText(sheet(GMT))).toContain("between 9 p.m. and 3 a.m.");
   });
 
-  it("explains the phantom date for a no-date dial on a date movement", () => {
+  it("explains the phantom date and finds midnight before the dial hides the date", () => {
     const result = sheet({ ...DIVER, dialId: "dial-nodate" });
     expect(result.notes.some((note) => note.startsWith("Phantom date: the NH35A has a date wheel"))).toBe(true);
-    expect(step(result, "Fit the dial")?.detail).toContain("date disc is hidden");
+    const dial = step(result, "Fit the dial")?.detail ?? "";
+    expect(dial).toContain("date disc will be hidden");
+    expect(dial.indexOf("until the date just snaps over")).toBeLessThan(dial.indexOf("Line the feet up"));
+    const hands = step(result, "Fit the hands")?.detail ?? "";
+    expect(hands).not.toContain("snaps over");
+    expect(hands).toContain("The date is hidden under this dial");
     expect(qc(result, "qc-date-change")).toBeUndefined();
+
+    expect(step(sheet(DIVER), "Fit the hands")?.detail).toContain("until the date just snaps over");
+    expect(step(sheet(DIVER), "Fit the dial")?.detail).not.toContain("snaps over");
+  });
+
+  it("presses a domed crystal with a ring die that keeps off the dome", () => {
+    const domed = sheet({ ...DIVER, crystalId: "crystal-domed" });
+    const prepare = step(domed, "Prepare the case");
+    expect(prepare?.detail).not.toContain("flat nylon dies");
+    expect(prepare?.detail).toContain("hollow (ring) die");
+    expect(prepare?.cautions.join(" ")).toContain("Never press a domed crystal with a flat die");
+    expect(domed.tools.some((tool) => tool.startsWith("Hollow (ring) crystal-press die"))).toBe(true);
+
+    const flat = sheet(DIVER);
+    expect(step(flat, "Prepare the case")?.detail).toContain("flat nylon dies");
+    expect(flat.tools.some((tool) => tool.startsWith("Hollow (ring)"))).toBe(false);
+  });
+
+  it("times the movement fully wound in SII's three positions and says what to do about a bad beat error", () => {
+    const result = sheet(DIVER);
+    const test = step(result, "Test the NH35A before assembly");
+    expect(test?.detail).toContain("at least 55 turns");
+    expect(test?.detail).toContain("10-60 minutes later");
+    expect(test?.detail).toContain("dial up, 9 o'clock up (crown down) and 6 o'clock up");
+    expect(test?.cautions.join(" ")).toContain("return or replace it");
+    expect(step(result, "Time and regulate")?.detail).toContain("no more than 60 s/day between the fastest and the slowest");
+    expect(qc(result, "qc-rate")?.criterion).toContain("no more than 60 s/day between the fastest and the slowest position");
+  });
+
+  it("doesn't pass a pressure test below the rating, and never exceeds an unconfirmed one", () => {
+    const diver = sheet(DIVER);
+    expect(step(diver, "Pressure test")?.detail).toContain("A test at a lower pressure is not a pass");
+    expect(step(diver, "Pressure test")?.cautions.join(" ")).not.toContain("hasn't confirmed");
+    expect(allText(diver)).not.toContain("record the pressure");
+
+    const dress = step(sheet(DRESS), "Pressure test");
+    expect(dress?.detail).toContain("dry-test it at 5 bar");
+    expect(dress?.cautions[0]).toBe(
+      "The case maker hasn't confirmed the 50m rating in writing: confirm it before testing, and never test above the rating the maker confirms.",
+    );
   });
 
   it("has no phantom date or calendar steps on a true no-date movement", () => {
@@ -368,8 +465,10 @@ describe("QC criteria come from the parts' data", () => {
     const result = sheet(DIVER);
     expect(qc(result, "qc-rate")?.criterion).toMatch(/^-15 to \+35 s\/day/);
     expect(qc(result, "qc-run-in")?.criterion).toContain("reserve 41 h");
-    expect(qc(result, "qc-water")?.criterion).toMatch(/^No leak at 30 bar \(the case's 300m rating\)/);
-    expect(result.tools).toContain("Pressure tester (the case is rated 30 bar)");
+    expect(qc(result, "qc-water")?.criterion).toBe(
+      "No leak when tested at 30 bar (the case's 300m rating). A test at a lower pressure doesn't pass this check.",
+    );
+    expect(result.tools).toContain("Pressure tester that reaches 30 bar (the case's rating)");
     expect(result.tools).toContain("Timegrapher (21,600 vph, lift angle 53°)");
   });
 

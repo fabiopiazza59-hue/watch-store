@@ -1,15 +1,18 @@
 // The single source of truth for "can this watch be built?". Rules are listed in
 // docs/feasibility-rules.md and implemented in ./checks; everything here is pure and deterministic.
-import { CATALOG, getSlotDef, NONE_OPTION_ID, partsForSlot } from "../catalog";
+import { CATALOG, getSlotDef, NONE_OPTION_ID, partsForSlot, TEMPLATES } from "../catalog";
 import type { Catalog, OptionStatus, RepairResult, SlotKey, ValidationReport, WatchSpec } from "../types";
 import { collectFindings, toIssue, withPart } from "./engine";
 import { suggestFixes } from "./fixes";
-import { repair } from "./repair";
+import { repair, repairAround as repairAroundLoop, repairKeepingParts } from "./repair";
 
 export { describeChanges } from "./repair";
 
-/** The brand and Swiss-indication check behind the dial-text and engraving rules, for free text. */
-export { reviewText, type TextReview } from "./text";
+/**
+ * The brand and Swiss-indication check behind the dial-text and engraving rules, for free text, and the
+ * clean-up (typographic apostrophes and dashes to ASCII) to apply wherever customer text enters a spec.
+ */
+export { normalizePersonalization, normalizePersonalizationText, reviewText, type TextReview } from "./text";
 
 /** Validate a full spec against every compatibility rule. Deterministic, pure. */
 export function validateSpec(spec: WatchSpec, catalog: Catalog = CATALOG): ValidationReport {
@@ -40,4 +43,23 @@ export function evaluateOptions(slot: SlotKey, spec: WatchSpec, catalog: Catalog
 /** Greedily apply suggested fixes until the spec is buildable or no fix makes progress. */
 export function repairSpec(spec: WatchSpec, catalog: Catalog = CATALOG): RepairResult {
   return repair(spec, (candidate) => validateSpec(candidate, catalog), catalog);
+}
+
+/**
+ * repairSpec that never changes the slots in `lockedSlots` (the parts a customer chose), taking the
+ * first fix of any error that leaves them alone. `changes` compares the result with `spec`.
+ */
+export function repairAround(spec: WatchSpec, lockedSlots: readonly SlotKey[], catalog: Catalog = CATALOG): RepairResult {
+  return repairAroundLoop(spec, lockedSlots, (candidate) => validateSpec(candidate, catalog), catalog);
+}
+
+/**
+ * The repair behind "keep the part I chose": repairAround first, then, if the design still can't be
+ * built, a wider search (every part for the other slots of the remaining problem, and every
+ * template's parts in the unlocked slots) that keeps the buildable result with the fewest changes
+ * plus warnings. Returns the greedy result when nothing fits around the locked parts.
+ */
+export function repairKeeping(spec: WatchSpec, lockedSlots: readonly SlotKey[], catalog: Catalog = CATALOG): RepairResult {
+  const templates = catalog === CATALOG ? TEMPLATES : [];
+  return repairKeepingParts(spec, lockedSlots, (candidate) => validateSpec(candidate, catalog), catalog, templates);
 }
