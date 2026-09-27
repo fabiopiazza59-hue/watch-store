@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, type Ref, useEffect, useId, useRef, useState } from "react";
 import { resolveExtras } from "@/domain/catalog";
@@ -6,9 +7,11 @@ import type { PriceQuote, ResolvedSpec, ValidationReport, WatchSpec } from "@/do
 import { ApiError, placeOrder } from "../apiClient";
 import { confirmationHref } from "../orders/links";
 import { WatchPreview } from "../preview/WatchPreview";
+import { STATIC_DEMO } from "../site/deployment";
 import { formatPrice, plural, vatNote } from "../ui/format";
 import { AlertIcon, CrossIcon } from "../ui/icons";
 import { buttonClass, cardClass, inputClass } from "../ui/styles";
+import { encodeSpec, SHARE_PARAM } from "./specCodec";
 
 interface OrderPanelProps {
   spec: WatchSpec;
@@ -17,7 +20,35 @@ interface OrderPanelProps {
   quote: PriceQuote;
 }
 
-export function OrderPanel({ spec, parts, report, quote }: OrderPanelProps) {
+export function OrderPanel(props: OrderPanelProps) {
+  return STATIC_DEMO ? <DemoOrderPanel {...props} /> : <LiveOrderPanel {...props} />;
+}
+
+/** The static demo has no server to take orders, so it opens the build sheet an order would get. */
+function DemoOrderPanel({ spec, report, quote }: OrderPanelProps) {
+  const blockedId = useId();
+  const href = { pathname: "/build-sheet/", query: { [SHARE_PARAM]: encodeSpec(spec) } };
+  return (
+    <section aria-label="Order" className={`${cardClass} p-5 sm:p-6`}>
+      {report.buildable ? (
+        <Link href={href} className={`${buttonClass("primary", "lg")} w-full`}>
+          See the build sheet &middot; {formatPrice(quote.retailInclVatEur)}
+        </Link>
+      ) : (
+        <button type="button" disabled aria-describedby={blockedId} className={`${buttonClass("primary", "lg")} w-full`}>
+          See the build sheet &middot; {formatPrice(quote.retailInclVatEur)}
+        </button>
+      )}
+      <p id={blockedId} className="mt-3 text-center text-sm leading-relaxed text-ink-soft">
+        {report.buildable
+          ? "This is a demo, so ordering is switched off. See the parts list, costs and assembly steps the workshop would work from."
+          : "Resolve the \u201cMust change\u201d items above first. Only designs the rules engine confirms can be built get a build sheet."}
+      </p>
+    </section>
+  );
+}
+
+function LiveOrderPanel({ spec, parts, report, quote }: OrderPanelProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);

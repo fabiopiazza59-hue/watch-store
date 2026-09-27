@@ -5,6 +5,7 @@ import { CATALOG, EXTRAS, PERSONALIZATION_LIMITS } from "@/domain/catalog";
 import { normalizePersonalizationText, reviewText } from "@/domain/rules";
 import { clampDesignName, watchSpecSchema } from "@/domain/schemas";
 import type { OrderExtras, Personalization, WatchSpec } from "@/domain/types";
+import { BASE_PATH } from "../site/deployment";
 
 /** Query parameter that holds a shared design. */
 export const SHARE_PARAM = "d";
@@ -133,7 +134,7 @@ export function decodeSpec(encoded: string): WatchSpec | null {
 
 /** Absolute link that opens the configurator on this design. */
 export function shareUrl(origin: string, spec: WatchSpec): string {
-  const url = new URL("/", origin);
+  const url = new URL(`${BASE_PATH}/`, origin);
   url.searchParams.set(SHARE_PARAM, encodeSpec(spec));
   return url.toString();
 }

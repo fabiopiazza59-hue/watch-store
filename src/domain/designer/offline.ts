@@ -1,7 +1,7 @@
 // The offline designer: turns a message into a buildable spec with keyword matching and catalogue
 // attributes, no AI involved. Used when no API key is configured and whenever the Claude designer
 // cannot answer. Deterministic: the same request always gives the same design and reply.
-import { CATALOG, DEFAULT_SPEC, findPart, partsForSlot, resolveSpec, TEMPLATES } from "../catalog";
+import { CATALOG, DEFAULT_SPEC, EXTRAS, findPart, partsForSlot, resolveSpec, specExtras, TEMPLATES } from "../catalog";
 import { evaluateOptions, repairSpec, validateSpec } from "../rules";
 import { DESIGN_NAME_MAX_LENGTH } from "../schemas";
 import type {
@@ -20,9 +20,10 @@ import type {
   WatchStyle,
 } from "../types";
 import { type ColorName, COLOR_WORDS, colorMatch } from "./colors";
+import { ADD_ON_IDS, type ExtrasIntent } from "./extrasIntent";
 import { customerPriceEur, priceFloor, type FloorKind } from "./floors";
 import { parseIntent, type DesignIntent, type UnsupportedFeature } from "./intent";
-import { SELECTION_ORDER, selectParts, type Selection, type SelectionOptions, type SlotChoice } from "./select";
+import { chooseSpareStrap, SELECTION_ORDER, selectParts, type Selection, type SelectionOptions, type SlotChoice } from "./select";
 import type { DesignDraft, FallbackReason } from "./types";
 
 /** Preference points per euro of part cost: a light tie-break, or a strong pull towards a budget. */
@@ -385,6 +386,50 @@ function warningCount(spec: WatchSpec, catalog: Catalog): number {
 }
 
 // ---------------------------------------------------------------------------
+// Extras: add-ons first (their cost counts towards a budget), the spare strap once the case is known
+// ---------------------------------------------------------------------------
+
+const EXTRA_ORDER = EXTRAS.map((extra) => extra.id);
+
+function isPackaging(id: string): boolean {
+  return EXTRAS.some((extra) => extra.id === id && extra.kind === "packaging");
+}
+
+/** The add-ons asked for put in, and the ones asked to go taken out. Unknown ids are never added. */
+function withAddOns(spec: WatchSpec, wish: ExtrasIntent): WatchSpec {
+  const current = specExtras(spec);
+  const items = new Set(current.itemIds);
+  wish.remove.forEach((id) => items.delete(id));
+  wish.add.filter((id) => EXTRA_ORDER.includes(id)).forEach((id) => items.add(id));
+  if (wish.gift) {
+    items.add(ADD_ON_IDS.giftWrap);
+    // A gift is handed over in something: a presentation box, unless it already has packaging.
+    if (![...items].some(isPackaging) && !wish.remove.includes(ADD_ON_IDS.box)) items.add(ADD_ON_IDS.box);
+  }
+  const unchanged = items.size === new Set(current.itemIds).size && current.itemIds.every((id) => items.has(id));
+  if (unchanged) return spec;
+  const itemIds = [...EXTRA_ORDER.filter((id) => items.has(id)), ...[...items].filter((id) => !EXTRA_ORDER.includes(id))];
+  return { ...spec, extras: { spareStrapId: current.spareStrapId, itemIds } };
+}
+
+/**
+ * The spare strap asked for, chosen for the design's final case; or none, when asked. A spare that
+ * became the main strap in this edit is swapped for another, since two identical straps is rarely
+ * the point of a spare. (A case change the spare doesn't fit was already repaired with the design.)
+ */
+function withSpareStrap(spec: WatchSpec, base: WatchSpec, wish: ExtrasIntent, catalog: Catalog): WatchSpec {
+  const current = specExtras(spec);
+  let spareStrapId = current.spareStrapId;
+  if (wish.removeSpareStrap) spareStrapId = null;
+  else if (wish.spareStrap) spareStrapId = chooseSpareStrap(spec, wish.spareStrap, catalog)?.id ?? spareStrapId;
+  else if (spareStrapId && spareStrapId === spec.strapId && spec.strapId !== base.strapId) {
+    spareStrapId = chooseSpareStrap(spec, undefined, catalog)?.id ?? spareStrapId;
+  }
+  if (spareStrapId === current.spareStrapId) return spec;
+  return { ...spec, extras: { spareStrapId, itemIds: [...current.itemIds] } };
+}
+
+// ---------------------------------------------------------------------------
 // The reply
 // ---------------------------------------------------------------------------
 
@@ -433,8 +478,8 @@ function unrecognisedReply(message: string, intent: DesignIntent, catalog: Catal
   }
   return (
     "I couldn't turn that into a design change. I understand styles (dive, field, dress, pilot, GMT, sport), colours, " +
-    `sizes from ${Math.min(...diameters)} to ${Math.max(...diameters)}mm, straps, budgets in euros, and text in quotes ` +
-    `for the dial or caseback.${english}`
+    `sizes from ${Math.min(...diameters)} to ${Math.max(...diameters)}mm, straps, budgets in euros, extras such as a spare ` +
+    `strap or gift wrapping, and text in quotes for the dial or caseback.${english}`
   );
 }
 
@@ -729,6 +774,72 @@ interface Note {
   covers?: WishKey[];
 }
 
+/** How the reply names an add-on it put in: "a presentation box", "fine regulation". */
+const ADDED_PHRASES: Record<string, string> = {
+  [ADD_ON_IDS.giftWrap]: "gift wrapping with a handwritten card",
+  [ADD_ON_IDS.regulation]: "fine regulation (aiming for within ±10 s/day, face up)",
+};
+
+function extraName(id: string): string {
+  return lowerFirst(EXTRAS.find((extra) => extra.id === id)?.name ?? id);
+}
+
+function spareName(strap: Strap): string {
+  return strap.type === "bracelet" ? strap.name : `${strap.name} strap`;
+}
+
+/** What changed in the extras, briefly: "I've added a spare Olive NATO 20mm strap and a presentation box." */
+function extrasSentences(before: WatchSpec, after: WatchSpec, intent: DesignIntent, catalog: Catalog): string[] {
+  const [was, now] = [specExtras(before), specExtras(after)];
+  const added = now.itemIds.filter((id) => !was.itemIds.includes(id)).map((id) => ADDED_PHRASES[id] ?? `a ${extraName(id)}`);
+  const removed = was.itemIds.filter((id) => !now.itemIds.includes(id)).map((id) => `the ${extraName(id)}`);
+  const sentences: string[] = [];
+  const spare = catalog.straps.find((strap) => strap.id === now.spareStrapId);
+  if (now.spareStrapId !== was.spareStrapId) {
+    if (!spare) removed.unshift("the spare strap");
+    else if (!was.spareStrapId) added.unshift(`a spare ${spareName(spare)}`);
+    else if (intent.extras.spareStrap) sentences.push(`I've changed the spare to the ${spareName(spare)}.`);
+    else if (before.caseId !== after.caseId) {
+      const lugs = resolveSpec(after, catalog).case?.lugWidthMm;
+      sentences.push(`The spare is now the ${spareName(spare)}, to fit the new case${lugs ? `'s ${lugs}mm lugs` : ""}.`);
+    } else sentences.push(`The spare is now the ${spareName(spare)}, so it isn't the same as the strap on the watch.`);
+  }
+  if (added.length > 0) sentences.unshift(`I've added ${listJoin(added)}.`);
+  if (removed.length > 0) sentences.push(`I've taken out ${listJoin(removed)}.`);
+  const wrapped = now.itemIds.includes(ADD_ON_IDS.giftWrap);
+  if (intent.cardMessage && wrapped) {
+    sentences.push(`The card's message isn't saved with the design, so we'll confirm '${intent.cardMessage}' with you by email after you order.`);
+  } else if (wrapped && !was.itemIds.includes(ADD_ON_IDS.giftWrap)) {
+    sentences.push("We'll confirm the card's message with you by email after you order.");
+  }
+  return sentences;
+}
+
+function strapKind(type: Strap["type"]): string {
+  return type === "nato" ? "NATO" : type;
+}
+
+/** When the spare strap isn't the kind or colour asked for, say so instead of passing it off as one. */
+function spareStrapNote(intent: DesignIntent, spec: WatchSpec, catalog: Catalog): string | undefined {
+  const wish = intent.extras.spareStrap;
+  const { case: watchCase, strap: main } = resolveSpec(spec, catalog);
+  const spare = catalog.straps.find((strap) => strap.id === specExtras(spec).spareStrapId);
+  if (!wish || !watchCase || !spare) return undefined;
+  const lugs = `${watchCase.lugWidthMm}mm`;
+  if (wish.type && spare.type !== wish.type) {
+    return `There's no ${strapWords(wish.type).replace("nato", "NATO")} for the ${lugs} lugs of this case, so the spare is the ${spareName(spare)} instead.`;
+  }
+  if (wish.type && spare.id === main?.id) {
+    return `The only ${strapKind(wish.type)} ${wish.type === "bracelet" ? "" : "strap "}for these ${lugs} lugs is the one on the watch, so the spare is a second ${spare.name}.`;
+  }
+  const [color] = wish.colors;
+  if (color && !hasColor(spare.colorHex, color)) {
+    const kind = strapWords(wish.type, wish.colorWords[0]).replace("nato", "NATO");
+    return `There's no ${kind} in ${lugs} for this case, so the spare is the ${spareName(spare)}.`;
+  }
+  return undefined;
+}
+
 function composeReply(req: DesignRequest, base: WatchSpec, intent: DesignIntent, result: Design, fallback: FallbackReason, catalog: Catalog) {
   const parts = resolveSpec(result.spec, catalog);
   const asked = new Set(wishes(intent, resolveSpec(base, catalog), catalog).flatMap(wishSlots));
@@ -752,19 +863,21 @@ function composeReply(req: DesignRequest, base: WatchSpec, intent: DesignIntent,
     { text: tradeOff?.slot === "strapId" ? undefined : strapNote(intent, parts), covers: ["strapType", "strapColor"] },
     ...caseNotes(intent, parts, catalog).map((text) => ({ text, covers: ["displayCaseback", "noBezel", "bezelColor", "ceramic", "countdown"] as WishKey[] })),
     { text: caseChangeNote(intent, req.currentSpec, parts, catalog) },
+    { text: spareStrapNote(intent, result.spec, catalog) },
   ];
   const given = candidates.filter((note): note is Note & { text: string } => Boolean(note.text));
   const explained = new Set(given.flatMap((note) => note.covers ?? []));
   const unmet = intent.recognised ? unmetNote(intent, base, parts, explained, catalog) : undefined;
   const notes = [...new Set([...given.map((note) => note.text), ...(unmet ? [unmet] : [])])].slice(0, MAX_NOTES);
+  const extras = extrasSentences(base, result.spec, intent, catalog);
 
-  const lead = opening(req.currentSpec, result.spec, req.message, intent, catalog, notes.length > 0);
+  const lead = opening(req.currentSpec, result.spec, req.message, intent, catalog, notes.length > 0 || extras.length > 0);
   // The unrecognised-message answer mentions English itself.
   const english = intent.foreign && intent.recognised ? "I understand English keywords best, so tell me if I missed anything." : undefined;
   // The introduction is for a first message, and the "didn't understand" answer already covers it.
   const firstTurn = (req.history?.length ?? 0) === 0;
   const introduce = fallback !== "no-key" || (firstTurn && intent.recognised);
-  return [lead, ...notes, statusLine(result.spec, catalog), english, introduce ? FALLBACK_NOTES[fallback] : undefined]
+  return [lead, ...extras, ...notes, statusLine(result.spec, catalog), english, introduce ? FALLBACK_NOTES[fallback] : undefined]
     .filter(Boolean)
     .join(" ");
 }
@@ -821,7 +934,8 @@ function proposalName(base: WatchSpec, after: WatchSpec, intent: DesignIntent, c
 export function designOffline(req: DesignRequest, fallback: FallbackReason, catalog: Catalog = CATALOG): DesignDraft {
   const base = req.currentSpec ?? DEFAULT_SPEC;
   const intent = parseIntent(req.message);
-  const result = designWithinBudget(base, intent, catalog);
+  const designed = designWithinBudget(withAddOns(base, intent.extras), intent, catalog);
+  const result = { ...designed, spec: withSpareStrap(designed.spec, base, intent.extras, catalog) };
   const named = { ...result, spec: { ...result.spec, name: proposalName(base, result.spec, intent, catalog) } };
   return {
     mode: "offline",

@@ -6,6 +6,8 @@ const isDev = process.env.NODE_ENV === "development";
  * so no API routes, orders or response headers; the designer runs offline in the browser.
  */
 const staticExport = process.env.STATIC_EXPORT === "1";
+/** "/watch-store" for a GitHub project site; set by the Pages workflow. */
+const pagesBasePath = process.env.PAGES_BASE_PATH ?? "";
 /** Set PUBLIC_ORIGIN (at build time) to the site's https:// address to also send the HTTPS-only headers. */
 const servedOverHttps = process.env.PUBLIC_ORIGIN?.trim().startsWith("https://") ?? false;
 
@@ -39,10 +41,10 @@ const securityHeaders = [
 const nextConfig: NextConfig = staticExport
   ? {
       output: "export",
-      basePath: process.env.PAGES_BASE_PATH ?? "",
+      basePath: pagesBasePath,
       trailingSlash: true,
       images: { unoptimized: true },
-      env: { NEXT_PUBLIC_STATIC_DEMO: "1" },
+      env: { NEXT_PUBLIC_STATIC_DEMO: "1", NEXT_PUBLIC_BASE_PATH: pagesBasePath },
     }
   : {
       poweredByHeader: false,
