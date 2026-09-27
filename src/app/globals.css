@@ -1,26 +1,136 @@
 @import "tailwindcss";
 
+/*
+ * Atelier palette: warm paper, deep ink, one brass accent. Status colours are muted so the
+ * feasibility verdict reads clearly without shouting. Every token is redefined for dark mode.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --paper: #f6f3ee;
+  --surface: #fdfbf8;
+  --surface-muted: #efe9e0;
+  --ink: #1d1a16;
+  --ink-soft: #544c44;
+  --ink-faint: #6c635a;
+  --line: #e3dbcf;
+  --line-strong: #cabdab;
+  --brass: #b08d57;
+  --brass-ink: #7a5a2b;
+  --brass-soft: #f1e7d6;
+  --ok: #2e6a47;
+  --ok-soft: #e3efe6;
+  --warn: #875a0e;
+  --warn-soft: #f7ecd7;
+  --danger: #a3392b;
+  --danger-soft: #f7e3de;
+  --info: #3d5873;
+  --info-soft: #e4e9ef;
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --paper: #15130f;
+    --surface: #1c1915;
+    --surface-muted: #26221c;
+    --ink: #efe9df;
+    --ink-soft: #c2b8aa;
+    --ink-faint: #a09585;
+    --line: #342f28;
+    --line-strong: #4b433a;
+    --brass: #c9a46c;
+    --brass-ink: #dcbb85;
+    --brass-soft: #2e2619;
+    --ok: #86c9a2;
+    --ok-soft: #1a2a20;
+    --warn: #e2b660;
+    --warn-soft: #2e2415;
+    --danger: #ee9282;
+    --danger-soft: #36201c;
+    --info: #a3bdd6;
+    --info-soft: #1c2530;
+    color-scheme: dark;
   }
 }
 
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-brass: var(--brass);
+  --color-brass-ink: var(--brass-ink);
+  --color-brass-soft: var(--brass-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-fraunces);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* In the base layer so components can override it with utilities (e.g. focus-visible:outline-none). */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--brass-ink);
+    outline-offset: 2px;
+  }
+}
+
+::selection {
+  background: var(--brass-soft);
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Build sheets are printed at the bench: plain white paper, ink text, no screen chrome. */
+@media print {
+  :root {
+    --paper: #fff;
+    --surface: #fff;
+    --surface-muted: #f4f4f4;
+    --ink: #000;
+    --ink-soft: #222;
+    --ink-faint: #444;
+    --line: #bbb;
+    --line-strong: #888;
+    color-scheme: light;
+  }
+
+  body {
+    font-size: 11pt;
+  }
+
+  a {
+    text-decoration: none;
+  }
 }

@@ -100,6 +100,11 @@ export interface Dial extends PartBase {
   style: WatchStyle;
   movementFamily: MovementFamily;
   diameterMm: number;
+  /**
+   * Diameter of the dial's centre hole, which must clear the movement's wheel pipes. Standard NH
+   * dials are about 2.05 mm; NH34-ready GMT dials about 2.7-2.9 mm (the 24h wheel is wider).
+   */
+  centerHoleMm: number;
   /** The crown position this dial's feet/print orientation is designed for. */
   crownPosition: CrownPosition;
   dateWindow: DateWindow;
