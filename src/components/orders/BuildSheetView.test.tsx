@@ -28,7 +28,35 @@ describe("bomSlotLabel", () => {
   });
 });
 
+const sheetWith = (bom: BomLine[]): BuildSheet => ({
+  title: "Build sheet",
+  summary: "",
+  bom,
+  tools: [],
+  steps: [],
+  qcChecks: [],
+  notes: [],
+  estimatedBenchMinutes: 90,
+});
+
 describe("BuildSheetView", () => {
+  it("shows unit costs and the materials total by default", () => {
+    const markup = renderToStaticMarkup(<BuildSheetView sheet={sheetWith([line("dialId", "dial-diver-black")])} orderId="ORD-1" />);
+    expect(markup).toContain("Materials total");
+    expect(markup).toMatch(/€\s?10/);
+  });
+
+  it("leaves every cost out when showCosts is off, keeping parts and quantities", () => {
+    const bom = [line("dialId", "dial-diver-black", "Diver Black"), line("strapId", "strap-rubber-black-22", "Black rubber")];
+    const markup = renderToStaticMarkup(
+      <BuildSheetView sheet={sheetWith(bom)} orderId="preview" showCosts={false} />,
+    );
+    expect(markup).toContain("Diver Black");
+    expect(markup).toContain("Qty 1");
+    expect(markup).not.toContain("Materials total");
+    expect(markup).not.toContain("€");
+  });
+
   it("lists the extras in the bill of materials", () => {
     const sheet: BuildSheet = {
       title: "Build sheet",

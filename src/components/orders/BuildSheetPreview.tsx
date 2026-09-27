@@ -20,8 +20,9 @@ import { SpecSummary } from "./SpecSummary";
 const PREVIEW_ID = "preview";
 
 /**
- * The demo's stand-in for an order: the build sheet and workshop quote for the design in the link,
- * worked out in the browser exactly as an order would get them.
+ * The demo's stand-in for an order: the build sheet for the design in the link, worked out in the
+ * browser exactly as an order would get it. The demo is public, so it shows the customer's price
+ * and leaves out the workshop's costs.
  */
 export function BuildSheetPreview() {
   const shared = useSearchParams().get(SHARE_PARAM);
@@ -48,8 +49,8 @@ export function BuildSheetPreview() {
             {spec.name.trim() || "Untitled design"}
           </h1>
           <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-soft">
-            In this demo, ordering is switched off. This is what the workshop receives with an order: the parts to buy,
-            the cost behind the price, and the steps and checks to build this watch by hand.
+            In this demo, ordering is switched off. This is what the workshop works from with an order: the parts to
+            buy, and the steps and checks to build this watch by hand.
           </p>
         </div>
         <div className="print:hidden">
@@ -77,7 +78,7 @@ export function BuildSheetPreview() {
 
         <section aria-labelledby="quote-title" className={`${cardClass} p-5 sm:p-6 print:hidden`}>
           <h2 id="quote-title" className={eyebrowClass}>
-            Quote
+            Price
           </h2>
           <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
             <p>
@@ -91,13 +92,18 @@ export function BuildSheetPreview() {
             </p>
           </div>
           <div className="mt-3 border-t border-line">
-            <QuoteBreakdown quote={quote} variant="workshop" />
+            <QuoteBreakdown quote={quote} variant="customer" />
           </div>
         </section>
       </div>
 
       <div className="mt-8">
-        <BuildSheetView sheet={sheet} orderId={PREVIEW_ID} spareStrapId={specExtras(spec).spareStrapId} />
+        <BuildSheetView
+          sheet={sheet}
+          orderId={PREVIEW_ID}
+          spareStrapId={specExtras(spec).spareStrapId}
+          showCosts={false}
+        />
       </div>
     </div>
   );

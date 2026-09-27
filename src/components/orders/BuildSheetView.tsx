@@ -34,10 +34,12 @@ interface BuildSheetViewProps {
   orderId: string;
   /** The order's spare strap, so its line reads "Spare strap" rather than "Extra". */
   spareStrapId?: string | null;
+  /** Unit costs and the materials total; off where the public can see the sheet (the static demo). */
+  showCosts?: boolean;
 }
 
 /** The watchmaker's instructions for one order, laid out to work on screen and on paper. */
-export function BuildSheetView({ sheet, orderId, spareStrapId }: BuildSheetViewProps) {
+export function BuildSheetView({ sheet, orderId, spareStrapId, showCosts = true }: BuildSheetViewProps) {
   const bomTotal = sheet.bom.reduce((total, line) => total + line.qty * line.unitCostEur, 0);
 
   return (
@@ -66,14 +68,18 @@ export function BuildSheetView({ sheet, orderId, spareStrapId }: BuildSheetViewP
               {line.partId && <p className="font-mono text-xs break-all text-ink-faint">{line.partId}</p>}
               <p className="mt-1 text-xs leading-relaxed text-ink-soft">{line.supplierHint}</p>
               <p className="mt-1 text-right text-sm text-ink tabular-nums">
-                {line.qty} &times; {formatCost(line.unitCostEur)} = {formatCost(line.qty * line.unitCostEur)}
+                {showCosts
+                  ? `${line.qty} × ${formatCost(line.unitCostEur)} = ${formatCost(line.qty * line.unitCostEur)}`
+                  : `Qty ${line.qty}`}
               </p>
             </li>
           ))}
-          <li className="flex justify-between py-3 font-medium text-ink">
-            <span>Materials total</span>
-            <span className="font-semibold tabular-nums">{formatCost(bomTotal)}</span>
-          </li>
+          {showCosts && (
+            <li className="flex justify-between py-3 font-medium text-ink">
+              <span>Materials total</span>
+              <span className="font-semibold tabular-nums">{formatCost(bomTotal)}</span>
+            </li>
+          )}
         </ul>
 
         <div className="mt-3 hidden overflow-x-auto sm:block print:block">
@@ -86,15 +92,19 @@ export function BuildSheetView({ sheet, orderId, spareStrapId }: BuildSheetViewP
                 <th scope="col" className="py-2 pr-4 font-medium">
                   Part and sourcing
                 </th>
-                <th scope="col" className="py-2 pr-4 text-right font-medium">
+                <th scope="col" className={`py-2 text-right font-medium ${showCosts ? "pr-4" : ""}`}>
                   Qty
                 </th>
-                <th scope="col" className="py-2 pr-4 text-right font-medium">
-                  Unit
-                </th>
-                <th scope="col" className="py-2 text-right font-medium">
-                  Total
-                </th>
+                {showCosts && (
+                  <>
+                    <th scope="col" className="py-2 pr-4 text-right font-medium">
+                      Unit
+                    </th>
+                    <th scope="col" className="py-2 text-right font-medium">
+                      Total
+                    </th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -106,20 +116,26 @@ export function BuildSheetView({ sheet, orderId, spareStrapId }: BuildSheetViewP
                     {line.partId && <span className="ml-2 font-mono text-xs text-ink-faint">{line.partId}</span>}
                     <span className="mt-0.5 block text-xs leading-relaxed text-ink-soft">{line.supplierHint}</span>
                   </td>
-                  <td className="py-2.5 pr-4 text-right tabular-nums">{line.qty}</td>
-                  <td className="py-2.5 pr-4 text-right tabular-nums">{formatCost(line.unitCostEur)}</td>
-                  <td className="py-2.5 text-right tabular-nums">{formatCost(line.qty * line.unitCostEur)}</td>
+                  <td className={`py-2.5 text-right tabular-nums ${showCosts ? "pr-4" : ""}`}>{line.qty}</td>
+                  {showCosts && (
+                    <>
+                      <td className="py-2.5 pr-4 text-right tabular-nums">{formatCost(line.unitCostEur)}</td>
+                      <td className="py-2.5 text-right tabular-nums">{formatCost(line.qty * line.unitCostEur)}</td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
-            <tfoot>
-              <tr className="border-t border-line-strong">
-                <th scope="row" colSpan={4} className="py-2.5 pr-4 text-right font-medium text-ink">
-                  Materials total
-                </th>
-                <td className="py-2.5 text-right font-semibold text-ink tabular-nums">{formatCost(bomTotal)}</td>
-              </tr>
-            </tfoot>
+            {showCosts && (
+              <tfoot>
+                <tr className="border-t border-line-strong">
+                  <th scope="row" colSpan={4} className="py-2.5 pr-4 text-right font-medium text-ink">
+                    Materials total
+                  </th>
+                  <td className="py-2.5 text-right font-semibold text-ink tabular-nums">{formatCost(bomTotal)}</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </div>
