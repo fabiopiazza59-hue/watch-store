@@ -14,6 +14,8 @@ import { hands } from "./hands";
 import { movements } from "./movements";
 import { straps } from "./straps";
 
+export { TEMPLATES, type DesignTemplate } from "./templates";
+
 /** The parts library: every part the workshop can source, with real dimensions. */
 export const CATALOG: Catalog = {
   movements,
@@ -35,6 +37,9 @@ export const SLOTS: SlotDef[] = [
   { slot: "crystalId", catalogKey: "crystals", category: "crystal", label: "Crystal", optional: false },
   { slot: "strapId", catalogKey: "straps", category: "strap", label: "Strap", optional: false },
 ];
+
+/** Option id used by `evaluateOptions` / pickers to represent "no part" for optional slots. */
+export const NONE_OPTION_ID = "none";
 
 export const PERSONALIZATION_LIMITS = {
   dialTextMaxLength: 20,
