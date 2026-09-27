@@ -1,4 +1,4 @@
-import { findPart, partsForSlot, SLOTS, type DesignTemplate } from "../catalog";
+import { EXTRAS, findPart, partsForSlot, SLOTS, specExtras, type DesignTemplate } from "../catalog";
 import type { Catalog, Personalization, RepairResult, SlotKey, SuggestedFix, ValidationReport, WatchSpec } from "../types";
 import { applyPatch } from "./engine";
 import { quote } from "./format";
@@ -107,11 +107,14 @@ export function repairKeepingParts(
 }
 
 function specKey(spec: WatchSpec): string {
+  const extras = specExtras(spec);
   return JSON.stringify([
     spec.name,
     ...SLOTS.map(({ slot }) => spec[slot]),
     spec.personalization.dialText,
     spec.personalization.casebackEngraving,
+    extras.spareStrapId,
+    extras.itemIds,
   ]);
 }
 
@@ -129,6 +132,36 @@ function textLabel(text: string): string {
   return text.trim() ? quote(text) : "none";
 }
 
+function extraLabel(id: string): string {
+  return EXTRAS.find((extra) => extra.id === id)?.name ?? `unknown add-on ${quote(id)}`;
+}
+
+function count(ids: readonly string[], id: string): number {
+  return ids.filter((candidate) => candidate === id).length;
+}
+
+/**
+ * "Spare strap: none → Olive NATO 20mm", then "Added: Presentation box" and "Removed: Gift wrapping
+ * and card" in catalogue order. Absent extras read as none.
+ */
+function describeExtrasChanges(before: WatchSpec, after: WatchSpec, catalog: Catalog): string[] {
+  const [was, now] = [specExtras(before), specExtras(after)];
+  const spare =
+    was.spareStrapId !== now.spareStrapId
+      ? [`Spare strap: ${partLabel(was.spareStrapId, catalog)} → ${partLabel(now.spareStrapId, catalog)}`]
+      : [];
+  const catalogueOrder = EXTRAS.map((extra) => extra.id);
+  const ids = [...new Set([...catalogueOrder, ...was.itemIds, ...now.itemIds])];
+  const items = ids.flatMap((id) => {
+    const [countBefore, countAfter] = [count(was.itemIds, id), count(now.itemIds, id)];
+    if (countBefore === countAfter) return [];
+    if (countBefore === 0) return [`Added: ${extraLabel(id)}`];
+    if (countAfter === 0) return [`Removed: ${extraLabel(id)}`];
+    return [`${countAfter > countBefore ? "Added" : "Removed"}: duplicate ${extraLabel(id)}`];
+  });
+  return [...spare, ...items];
+}
+
 /** Human-readable differences between two specs: "Strap: Black rubber 22mm → Olive NATO 20mm". */
 export function describeChanges(before: WatchSpec, after: WatchSpec, catalog: Catalog): string[] {
   const parts = SLOTS.filter(({ slot }) => before[slot] !== after[slot]).map(
@@ -138,5 +171,5 @@ export function describeChanges(before: WatchSpec, after: WatchSpec, catalog: Ca
     ([field, label]) =>
       `${label}: ${textLabel(before.personalization[field])} → ${textLabel(after.personalization[field])}`,
   );
-  return [...parts, ...texts];
+  return [...parts, ...texts, ...describeExtrasChanges(before, after, catalog)];
 }

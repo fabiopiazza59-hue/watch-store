@@ -66,6 +66,9 @@ describe("spareStrapOptions", () => {
     ]);
     expect(options[1].strap).toBe(CATALOG.straps.find((strap) => strap.id === "strap-leather-brown-22"));
     expect(options[2].reason).toBe(TOO_NARROW);
+    expect(options.map((option) => option.sameAsWatch)).toEqual([false, false, false, false]);
+    const onBrown = spareStrapOptions({ ...DEFAULT_SPEC, strapId: "strap-leather-brown-22" }, STATUSES);
+    expect(onBrown.map((option) => option.sameAsWatch)).toEqual([false, true, false, false]);
   });
 
   it("prices each choice against the design as it stands", () => {

@@ -4,7 +4,7 @@ import { WatchPreview } from "../preview/WatchPreview";
 import { formatDate, formatPrice, plural, vatNote } from "../ui/format";
 import { CheckIcon } from "../ui/icons";
 import { buttonClass, cardClass, eyebrowClass } from "../ui/styles";
-import { orderParts } from "./orderParts";
+import { orderExtras, orderParts } from "./orderParts";
 import { SpecSummary } from "./SpecSummary";
 
 /**
@@ -44,7 +44,7 @@ export function OrderConfirmation({ order }: { order: Order }) {
             <WatchPreview parts={parts} personalization={order.spec.personalization} size={340} className="h-auto w-full" />
           </div>
           <div className="mt-4">
-            <SpecSummary spec={order.spec} parts={parts} orderedNames={orderedNames} />
+            <SpecSummary spec={order.spec} parts={parts} orderedNames={orderedNames} extras={orderExtras(order)} />
           </div>
         </section>
 

@@ -2,19 +2,22 @@
 //
 // Procedures follow Seiko's NH3x/4R3x instructions and common modding practice. Where practice varies
 // between case makers the text says so rather than guessing.
-import { CATALOG, dateWheelColour, resolveSpec, SLOTS } from "./catalog";
+import { CATALOG, dateWheelColour, EXTRAS, resolveExtras, resolveSpec, SLOTS, specExtras } from "./catalog";
 import type {
   BomLine,
   BuildSheet,
   BuildStep,
   Catalog,
   CrownPosition,
+  Extra,
   Movement,
   Part,
   Personalization,
   QcCheck,
+  ResolvedExtras,
   ResolvedSpec,
   SlotDef,
+  Strap,
   WatchSpec,
 } from "./types";
 
@@ -33,7 +36,75 @@ export const BENCH_MINUTES = {
   perPersonalization: 10,
   /** Taking out links to the wrist size and fitting the end links. */
   braceletSizing: 15,
+  /** Checking a spare strap against the lugs, fitting its spring bars and packing it (a bracelet is sized too). */
+  spareStrap: 5,
 } as const;
+
+/** Add-ons with a procedure of their own on this sheet (ids from catalog/extras.ts). */
+export const EXTRA_PROCEDURE_IDS = {
+  fineRegulation: "extra-fine-regulation",
+  timingCertificate: "extra-timing-certificate",
+  giftWrap: "extra-gift-wrap",
+  springBarTool: "extra-spring-bar-tool",
+} as const;
+
+/** Fine regulation's promise: the rate dial up (face up), in s/day. Other positions keep the factory spec. */
+export const FINE_REGULATION_TARGET_SEC_PER_DAY = 10;
+
+/** One thing the order includes beyond the watch, as the BOM and the price list show it. */
+export interface ExtraLine {
+  /** The spare strap's id or the add-on's id. */
+  id: string;
+  /** "Spare strap: Olive NATO 20mm", "Presentation box". */
+  label: string;
+  costEur: number;
+  leadTimeDays: number;
+  supplierHint: string;
+  /** Bench time it adds, included in `estimateBenchMinutes`. */
+  benchMinutes: number;
+  /**
+   * Bought in for this order, so it arrives as a parcel of its own, like a part: the spare strap and
+   * any add-on with a supplier lead time. Add-ons without one come from the workshop's stock or bench.
+   */
+  parcel: boolean;
+}
+
+/** The spare strap first, then each add-on, in the order the extras resolved. */
+export function extraLines(extras: ResolvedExtras): ExtraLine[] {
+  const strap = extras.spareStrap;
+  const spare: ExtraLine[] = strap
+    ? [
+        {
+          id: strap.id,
+          label: `Spare strap: ${strap.name}`,
+          costEur: strap.costEur,
+          leadTimeDays: strap.leadTimeDays,
+          supplierHint: strap.supplierHint,
+          benchMinutes: BENCH_MINUTES.spareStrap + (strap.type === "bracelet" ? BENCH_MINUTES.braceletSizing : 0),
+          parcel: true,
+        },
+      ]
+    : [];
+  const items = extras.items.map(
+    (extra): ExtraLine => ({
+      id: extra.id,
+      label: extra.name,
+      costEur: extra.costEur,
+      leadTimeDays: extra.leadTimeDays,
+      supplierHint: extra.supplierHint,
+      benchMinutes: extra.benchMinutes,
+      parcel: extra.leadTimeDays > 0,
+    }),
+  );
+  return [...spare, ...items];
+}
+
+/** Bench minutes the extras add: fitting and packing a spare strap, and each add-on's own time. */
+export function extrasBenchMinutes(extras: ResolvedExtras): number {
+  return extraLines(extras).reduce((total, line) => total + line.benchMinutes, 0);
+}
+
+const NO_EXTRAS_RESOLVED: ResolvedExtras = { items: [] };
 
 export interface PersonalizationService {
   label: string;
@@ -92,14 +163,19 @@ export function partsBySlot(spec: WatchSpec, catalog: Catalog = CATALOG): SlotPa
   });
 }
 
-/** Bench minutes for one watch. Pure; unknown/missing parts simply add nothing. */
-export function estimateBenchMinutes(parts: ResolvedSpec, personalization: Personalization): number {
+/** Bench minutes for one watch and its extras. Pure; unknown/missing parts simply add nothing. */
+export function estimateBenchMinutes(
+  parts: ResolvedSpec,
+  personalization: Personalization,
+  extras: ResolvedExtras = NO_EXTRAS_RESOLVED,
+): number {
   return (
     BENCH_MINUTES.base +
     (parts.movement?.complications.includes("gmt") ? BENCH_MINUTES.gmtHand : 0) +
     (parts.bezelInsert ? BENCH_MINUTES.bezelInsert : 0) +
     requestedPersonalization(personalization).length * BENCH_MINUTES.perPersonalization +
-    (parts.strap?.type === "bracelet" ? BENCH_MINUTES.braceletSizing : 0)
+    (parts.strap?.type === "bracelet" ? BENCH_MINUTES.braceletSizing : 0) +
+    extrasBenchMinutes(extras)
   );
 }
 
@@ -113,6 +189,8 @@ const SII_TIMING = {
   /** When to measure after a full wind. */
   measureWindow: "10-60 minutes",
   positions: "dial up, 9 o'clock up (crown down) and 6 o'clock up",
+  /** The same positions other than dial up. */
+  otherPositions: "9 o'clock up (crown down) and 6 o'clock up",
   /** Largest spread between the fastest and slowest of those positions, s/day. */
   maxPostureDifference: 60,
 } as const;
@@ -137,12 +215,23 @@ interface Build {
   screwDownCrown: boolean;
   displayBack: boolean;
   bracelet: boolean;
+  spare?: Strap;
+  fineRegulation: boolean;
+  timingCertificate: boolean;
+  giftWrap: boolean;
+  springBarTool: boolean;
+  /** Boxes and pouches, in catalogue order: the first one holds the watch. */
+  packaging: Extra[];
+  /** Add-ons packed with the watch that no step below handles by name. */
+  otherPacked: Extra[];
 }
 
-function describeBuild(spec: WatchSpec, parts: ResolvedSpec): Build {
+function describeBuild(spec: WatchSpec, parts: ResolvedSpec, extras: ResolvedExtras): Build {
   const { movement, dial } = parts;
   const aperture = dial?.dateWindow ?? "none";
   const hasDay = movement?.complications.includes("day") ?? false;
+  const ordered = (id: string) => extras.items.some((extra) => extra.id === id);
+  const named = new Set<string>(Object.values(EXTRA_PROCEDURE_IDS));
   return {
     parts,
     dialText: spec.personalization.dialText.trim(),
@@ -155,6 +244,13 @@ function describeBuild(spec: WatchSpec, parts: ResolvedSpec): Build {
     screwDownCrown: parts.case?.screwDownCrown ?? false,
     displayBack: parts.case?.caseback === "display",
     bracelet: parts.strap?.type === "bracelet",
+    spare: extras.spareStrap,
+    fineRegulation: ordered(EXTRA_PROCEDURE_IDS.fineRegulation),
+    timingCertificate: ordered(EXTRA_PROCEDURE_IDS.timingCertificate),
+    giftWrap: ordered(EXTRA_PROCEDURE_IDS.giftWrap),
+    springBarTool: ordered(EXTRA_PROCEDURE_IDS.springBarTool),
+    packaging: extras.items.filter((extra) => extra.kind === "packaging"),
+    otherPacked: extras.items.filter((extra) => extra.kind !== "packaging" && extra.kind !== "service" && !named.has(extra.id)),
   };
 }
 
@@ -169,6 +265,20 @@ function signed(value: number): string {
 
 function formatAccuracy(movement: Movement): string {
   return `${signed(movement.accuracySecPerDay.min)} to ${signed(movement.accuracySecPerDay.max)} s/day`;
+}
+
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
+/** "a, b and c". */
+function listJoin(items: string[]): string {
+  return items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/** "Olive NATO 20mm strap", "Steel bracelet 20mm". */
+function strapNoun(strap: Strap): string {
+  return strap.type === "bracelet" ? strap.name : `${strap.name} strap`;
 }
 
 function formatMinutes(minutes: number): string {
@@ -456,6 +566,28 @@ const regulate: StepBuilder = ({ parts, isGmt }) => {
   };
 };
 
+const fineRegulate: StepBuilder = ({ parts, fineRegulation }) => {
+  const { movement } = parts;
+  if (!fineRegulation || !movement) return null;
+  const target = FINE_REGULATION_TARGET_SEC_PER_DAY;
+  return {
+    title: "Fine regulation (ordered)",
+    detail: sentences(
+      `The customer ordered fine regulation: a second, slower session on the timegrapher, aiming for the rate dial up (face up) within -${target} to +${target} s/day.`,
+      `Wait about 15 minutes after the last adjustment, make sure the watch is still well wound (at least ${SII_TIMING.fullWindTurns} turns from empty), and take readings dial up only once the trace has settled, a minute or more each.`,
+      "Adjust the rate only, with the regulator lever, in the smallest movements you can make, and re-measure after each one.",
+      "Aim for the middle of the target, not its edge, so the small shift that casing up and the run-in can bring keeps it inside.",
+      `When it's there, measure ${SII_TIMING.otherPositions} as well and record them as they are, with the dial-up rate, amplitude and beat error, on the order.`,
+    ),
+    cautions: [
+      `Don't chase the other positions with the regulator: the promise is dial up only, and the difference between positions is the movement's own. They stay within the factory spec of ${formatAccuracy(movement)}.`,
+      "Leave the beat error alone (it's set at the stud carrier): fine regulation is the rate only.",
+      `If the rate won't hold within ±${target} s/day dial up, or the amplitude is low, look for the cause (a rubbing hand, magnetism, a tired movement) rather than pushing the regulator further, and don't ship it as finely regulated until it passes.`,
+      "The final QC measures dial up again after the run-in. If the rate has left the target by then, open the caseback, adjust, and repeat the pressure test.",
+    ],
+  };
+};
+
 const closeCaseback: StepBuilder = ({ displayBack, engraving, parts }) => {
   if (!parts.case) return null;
   return {
@@ -541,11 +673,79 @@ const setAndFitStrap: StepBuilder = ({ parts, showsDate, showsDay, isGmt, bracel
   };
 };
 
+const checkSpareStrap: StepBuilder = ({ spare, parts }) => {
+  if (!spare) return null;
+  const watchCase = parts.case;
+  const fittedEndLinks = Boolean(spare.compatibleCaseIds?.length);
+  const lugs = watchCase ? `, the ${watchCase.name}'s lug width` : "";
+  return {
+    title: "Check the spare strap",
+    detail: sentences(
+      `The order includes a spare ${strapNoun(spare)}. Measure it at the lug end with calipers: it should be ${spare.widthMm}mm${lugs}.`,
+      spare.type === "nato"
+        ? "Thread it under the watch's spring bars to check it slides through without catching, then take it off again: a NATO needs no spring bars of its own."
+        : "Offer it up between the lugs: it should fill the gap with no play and without forcing. Fit its spring bars (or check its quick-release pins) so the customer can swap it straight on.",
+      fittedEndLinks && "Its solid end links are made for this case: fit it briefly to check they sit flush against the case, then refit the watch's own strap and pull-test both ends again.",
+      spare.type === "bracelet" &&
+        "Size it to the customer's wrist as for a bracelet on the watch (ask if the size isn't in the order notes), and pack the links you take out with it.",
+      "Set it aside for packing.",
+    ),
+    cautions: present([
+      "A spare that won't seat without forcing is the wrong width: check the measurement against the order instead of forcing it.",
+      watchCase?.finish.includes("polished") && "Guard the polished lugs from the spring-bar tool; a slip leaves a scratch.",
+    ]),
+  };
+};
+
 const runIn: StepBuilder = () => ({
   title: "Run-in and final QC",
   detail: "Fully wind the watch and leave it running for 24 hours, then work through every QC check below and record the results on the order before it ships.",
   cautions: ["A watch that fails a check goes back to the step the problem came from. Note what you fixed on the order."],
 });
+
+const fillTimingCertificate: StepBuilder = ({ timingCertificate }) =>
+  timingCertificate
+    ? {
+        title: "Fill in the timing certificate",
+        detail: sentences(
+          "The customer ordered a timing certificate. Once the watch has passed the final QC, copy that check's timegrapher readings onto the card: the date of the test, the rate in each position measured, the amplitude and the beat error, and the result of the 24-hour run.",
+          `Note how they were taken: fully wound, ${SII_TIMING.measureWindow} after winding, lift angle ${LIFT_ANGLE_DEG}°.`,
+          "Sign and date the card.",
+        ),
+        cautions: [
+          "Write the readings exactly as measured, never rounded towards a target: the card is a record of this watch, not a promise.",
+          "Take them from the final QC, cased and after the run-in, not from the regulation session with the caseback off.",
+        ],
+      }
+    : null;
+
+const packOrder: StepBuilder = ({ spare, packaging, springBarTool, timingCertificate, giftWrap, otherPacked }) => {
+  const [holder, ...otherPackaging] = packaging;
+  const items = present([
+    holder && `the watch in the ${lowerFirst(holder.name)}`,
+    ...otherPackaging.map((extra) => `the ${lowerFirst(extra.name)}`),
+    spare && `the spare ${strapNoun(spare)}${springBarTool ? " with the spring-bar tool" : ""}`,
+    springBarTool && !spare && "the spring-bar tool",
+    timingCertificate && "the signed timing certificate",
+    ...otherPacked.map((extra) => `the ${lowerFirst(extra.name)}`),
+  ]);
+  if (items.length === 0 && !giftWrap) return null;
+  return {
+    title: giftWrap ? "Pack and gift-wrap the order" : "Pack the order",
+    detail: sentences(
+      items.length > 0 && `Pack ${listJoin(items)}.`,
+      giftWrap &&
+        `Wrap ${items.length > 0 ? "it" : "the watch's box"} by hand and add the card, handwritten with the message the customer confirmed by email.`,
+      "Then pack it for shipping so nothing can move in transit.",
+    ),
+    cautions: present([
+      giftWrap &&
+        "The card message isn't part of the order: confirm the card message with the customer by email, and write the card only once they've replied.",
+      giftWrap && "Keep the price and the order papers out of the wrapped gift; they go in the shipping carton.",
+      spare && "Pack the spare so its spring bars can't work loose or rub against the watch.",
+    ]),
+  };
+};
 
 const STEPS: StepBuilder[] = [
   printDialText,
@@ -559,28 +759,45 @@ const STEPS: StepBuilder[] = [
   caseMovement,
   fitCrown,
   regulate,
+  fineRegulate,
   closeCaseback,
   fitBezelInsert,
   pressureTest,
   setAndFitStrap,
+  checkSpareStrap,
   runIn,
+  fillTimingCertificate,
+  packOrder,
 ];
 
 // ---------------------------------------------------------------------------
 // QC checks, with acceptance criteria taken from the parts' own data.
 // ---------------------------------------------------------------------------
 
+/** The timekeeping criterion: the factory spec, or with fine regulation its dial-up target and the spec elsewhere. */
+function rateCriterion(movement: Movement, fineRegulation: boolean): string {
+  const conditions = `measured ${SII_TIMING.measureWindow} after a full wind (lift angle ${LIFT_ANGLE_DEG}°), with no more than ${SII_TIMING.maxPostureDifference} s/day between the fastest and the slowest position; amplitude 250-310°, beat error under ${MAX_BEAT_ERROR_MS} ms.`;
+  if (!fineRegulation) return `${formatAccuracy(movement)} ${SII_TIMING.positions}, ${conditions}`;
+  const target = FINE_REGULATION_TARGET_SEC_PER_DAY;
+  return (
+    `Dial up within -${target} to +${target} s/day (fine regulation was ordered); ${SII_TIMING.otherPositions} within the factory spec of ` +
+    `${formatAccuracy(movement)}, as positional differences aren't adjusted. All ${conditions}`
+  );
+}
+
 function qcChecks(build: Build): QcCheck[] {
   const { parts, showsDate, showsDay, isGmt, displayBack, bracelet, screwDownCrown, dialText, engraving } = build;
+  const { spare, fineRegulation, timingCertificate } = build;
   const { movement, case: watchCase, dial, hands } = parts;
   const rotatingBezel = watchCase?.bezel === "unidirectional-120" || watchCase?.bezel === "bidirectional-24h";
   const lumed = (dial && dial.lume !== "none") || (hands && hands.lume !== "none");
+  const packed = packedItems(build);
 
   return present<QcCheck>([
     movement && {
       id: "qc-rate",
       label: "Timekeeping",
-      criterion: `${formatAccuracy(movement)} ${SII_TIMING.positions}, measured ${SII_TIMING.measureWindow} after a full wind (lift angle ${LIFT_ANGLE_DEG}°), with no more than ${SII_TIMING.maxPostureDifference} s/day between the fastest and the slowest position; amplitude 250-310°, beat error under ${MAX_BEAT_ERROR_MS} ms.`,
+      criterion: rateCriterion(movement, fineRegulation),
     },
     movement && {
       id: "qc-run-in",
@@ -674,6 +891,37 @@ function qcChecks(build: Build): QcCheck[] {
       label: "Caseback engraving",
       criterion: `Reads exactly "${engraving}", clean and legible, with no burrs.`,
     },
+    spare && {
+      id: "qc-spare-strap",
+      label: "Spare strap",
+      criterion: sentences(
+        `Measures ${spare.widthMm}mm${watchCase ? `, the case's lug width,` : ""} and sits between the lugs with no play and without forcing.`,
+        spare.type === "nato" ? "Threads cleanly under the spring bars." : "Its spring bars are fitted and spring back fully.",
+        Boolean(spare.compatibleCaseIds?.length) && "Its end links sit flush against the case.",
+        "Undamaged, and packed for the customer.",
+      ),
+    },
+    timingCertificate && {
+      id: "qc-timing-certificate",
+      label: "Timing certificate",
+      criterion: "Filled in with the final QC's readings (date, rate in each position measured, amplitude, beat error, 24-hour run), matching the order's record, and signed.",
+    },
+    packed.length > 0 && {
+      id: "qc-contents",
+      label: "Order contents",
+      criterion: `Packed with ${listJoin(packed)}${build.giftWrap ? ", gift-wrapped, with the card written as the customer confirmed by email" : ""}.`,
+    },
+  ]);
+}
+
+/** What goes in the box besides the watch, for the contents check. */
+function packedItems({ spare, packaging, springBarTool, timingCertificate, otherPacked }: Build): string[] {
+  return present([
+    ...packaging.map((extra) => `the ${lowerFirst(extra.name)}`),
+    spare && `the spare ${strapNoun(spare)}`,
+    springBarTool && "the spring-bar tool",
+    timingCertificate && "the signed timing certificate",
+    ...otherPacked.map((extra) => `the ${lowerFirst(extra.name)}`),
   ]);
 }
 
@@ -681,7 +929,12 @@ function qcChecks(build: Build): QcCheck[] {
 // BOM, tools and notes
 // ---------------------------------------------------------------------------
 
-function billOfMaterials(slots: SlotPart[], personalization: Personalization, movementOrder: string | null): BomLine[] {
+function billOfMaterials(
+  slots: SlotPart[],
+  personalization: Personalization,
+  movementOrder: string | null,
+  extras: ResolvedExtras,
+): BomLine[] {
   const partLines = slots.flatMap(({ def, part }): BomLine[] => {
     if (!part) return [];
     const name = part.category === "movement" && movementOrder ? `${part.name}, ${movementOrder}` : part.name;
@@ -697,10 +950,20 @@ function billOfMaterials(slots: SlotPart[], personalization: Personalization, mo
       supplierHint: service.supplierHint,
     }),
   );
-  return [...partLines, ...serviceLines];
+  const extrasLines = extraLines(extras).map(
+    (line): BomLine => ({
+      slot: "extra",
+      partId: line.id,
+      name: line.label,
+      qty: 1,
+      unitCostEur: line.costEur,
+      supplierHint: line.supplierHint,
+    }),
+  );
+  return [...partLines, ...serviceLines, ...extrasLines];
 }
 
-function toolsFor({ parts, isGmt, bracelet }: Build): string[] {
+function toolsFor({ parts, isGmt, bracelet, spare, giftWrap }: Build): string[] {
   const { movement, case: watchCase, bezelInsert, crystal } = parts;
   return present([
     "Movement holder for NH3x movements",
@@ -728,18 +991,33 @@ function toolsFor({ parts, isGmt, bracelet }: Build): string[] {
     "Demagnetiser",
     watchCase ? `Pressure tester that reaches ${watchCase.waterResistanceM / 10} bar (the case's rating)` : "Pressure tester",
     "Spring-bar tool",
-    bracelet && "Bracelet link tool (pin pusher or fine screwdrivers, to suit the link pins)",
+    (bracelet || spare?.type === "bracelet") && "Bracelet link tool (pin pusher or fine screwdrivers, to suit the link pins)",
     bezelInsert && "Isopropyl alcohol and lint-free swabs",
+    giftWrap && "Wrapping paper, ribbon and a blank card",
   ]);
 }
 
-function notesFor(build: Build, slots: SlotPart[]): string[] {
+/** Extras the spec asks for that the catalogues don't have, as note phrases. */
+function unknownExtras(spec: WatchSpec, extras: ResolvedExtras): string[] {
+  const { spareStrapId, itemIds } = specExtras(spec);
+  const spare = spareStrapId && !extras.spareStrap ? [`spare strap '${spareStrapId}' is not in the catalogue`] : [];
+  const items = [...new Set(itemIds)]
+    .filter((id) => !EXTRAS.some((extra) => extra.id === id))
+    .map((id) => `add-on '${id}' is not in the catalogue`);
+  return [...spare, ...items];
+}
+
+function notesFor(build: Build, slots: SlotPart[], unknown: string[]): string[] {
   const { parts, phantomDate, hiddenDay } = build;
-  const missing = slots.filter(({ def, id, part }) => !part && !(def.optional && !id));
+  const missing = slots
+    .filter(({ def, id, part }) => !part && !(def.optional && !id))
+    .map(({ def, id }) => (id ? `${def.label.toLowerCase()} '${id}' is not in the catalogue` : `no ${def.label.toLowerCase()} chosen`));
+  const problems = [...missing, ...unknown];
   const dataNotes = slots.flatMap(({ part }) => (part?.dataNotes ? [`${part.name}: ${part.dataNotes}`] : []));
   return present([
-    missing.length > 0 &&
-      `Not buildable as specified: ${missing.map(({ def, id }) => (id ? `${def.label.toLowerCase()} '${id}' is not in the catalogue` : `no ${def.label.toLowerCase()} chosen`)).join("; ")}. Check the design's validation report.`,
+    problems.length > 0 && `Not buildable as specified: ${problems.join("; ")}. Check the design's validation report.`,
+    build.giftWrap &&
+      "Gift order: the card message isn't part of the order. Confirm the card message with the customer by email now, so the card is ready at packing.",
     phantomDate &&
       `Phantom date: the ${parts.movement?.caliber} has a date wheel but the ${parts.dial?.name} dial has no window, so the crown's first position turns a hidden ${hiddenDay ? "date and day" : "date"} and nothing visible happens. Tell the customer this is normal.`,
     hiddenDay &&
@@ -749,27 +1027,30 @@ function notesFor(build: Build, slots: SlotPart[]): string[] {
   ]);
 }
 
-function summaryFor({ parts }: Build, benchMinutes: number): string {
+function summaryFor({ parts, spare }: Build, extras: ResolvedExtras, benchMinutes: number): string {
   const { movement, case: watchCase, dial, hands } = parts;
   const heart = movement && watchCase ? `${movement.name} in the ${watchCase.name}` : "An NH3x build";
   const face = dial && hands ? ` with the ${dial.name} dial and ${hands.name} hands` : "";
-  return `${heart}${face}. About ${formatMinutes(benchMinutes)} at the bench, plus regulation, a pressure test and a 24-hour run-in.`;
+  const ordered = [...(spare ? [`a spare ${strapNoun(spare)}`] : []), ...extras.items.map((extra) => lowerFirst(extra.name))];
+  const withExtras = ordered.length > 0 ? ` Extras: ${listJoin(ordered)}.` : "";
+  return `${heart}${face}. About ${formatMinutes(benchMinutes)} at the bench, plus regulation, a pressure test and a 24-hour run-in.${withExtras}`;
 }
 
 /** Step-by-step assembly instructions, BOM, tools and QC checks for the watchmaker. Pure. */
 export function createBuildSheet(spec: WatchSpec, catalog: Catalog = CATALOG): BuildSheet {
   const parts = resolveSpec(spec, catalog);
-  const build = describeBuild(spec, parts);
+  const extras = resolveExtras(spec, catalog);
+  const build = describeBuild(spec, parts, extras);
   const slots = partsBySlot(spec, catalog);
-  const estimatedBenchMinutes = estimateBenchMinutes(parts, spec.personalization);
+  const estimatedBenchMinutes = estimateBenchMinutes(parts, spec.personalization, extras);
   return {
     title: `Build sheet: ${spec.name.trim() || "Untitled design"}`,
-    summary: summaryFor(build, estimatedBenchMinutes),
-    bom: billOfMaterials(slots, spec.personalization, movementVariant(build)),
+    summary: summaryFor(build, extras, estimatedBenchMinutes),
+    bom: billOfMaterials(slots, spec.personalization, movementVariant(build), extras),
     tools: toolsFor(build),
     steps: present(STEPS.map((step) => step(build))),
     qcChecks: qcChecks(build),
-    notes: notesFor(build, slots),
+    notes: notesFor(build, slots, unknownExtras(spec, extras)),
     estimatedBenchMinutes,
   };
 }

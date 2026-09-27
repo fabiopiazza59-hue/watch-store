@@ -29,7 +29,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Far above the six add-ons there are; stops a pathological list before it is looked at. */
-const MAX_EXTRA_ITEMS = 50;
+const MAX_LINKED_EXTRA_ITEMS = 50;
 
 /**
  * The extras of a saved or linked design. Anything malformed means none (undefined), rather than
@@ -41,7 +41,7 @@ function readExtras(value: unknown): OrderExtras | undefined {
   if (!isRecord(value)) return undefined;
   const { spareStrapId = null, itemIds = [] } = value;
   if (spareStrapId !== null && typeof spareStrapId !== "string") return undefined;
-  if (!Array.isArray(itemIds) || itemIds.length > MAX_EXTRA_ITEMS) return undefined;
+  if (!Array.isArray(itemIds) || itemIds.length > MAX_LINKED_EXTRA_ITEMS) return undefined;
   if (!itemIds.every((id): id is string => typeof id === "string")) return undefined;
   return {
     spareStrapId: CATALOG.straps.some((strap) => strap.id === spareStrapId) ? spareStrapId : null,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BENCH_MINUTES } from "./buildSheet";
-import { CATALOG } from "./catalog";
+import { CATALOG, EXTRAS } from "./catalog";
 import { charmPrice, PRICING_CONFIG, priceSpec } from "./pricing";
 import type { Catalog, PriceLine, PriceQuote, WatchSpec } from "./types";
 
@@ -21,6 +21,7 @@ function fixtureCatalog(): Catalog {
     straps: [
       { ...strap, id: "strap", name: "Test rubber", type: "rubber", costEur: 18, leadTimeDays: 7 },
       { ...strap, id: "bracelet", name: "Test bracelet", type: "bracelet", costEur: 55, leadTimeDays: 7 },
+      { ...strap, id: "nato", name: "Test NATO", type: "nato", costEur: 9.5, leadTimeDays: 20 },
     ],
   };
 }
@@ -60,13 +61,23 @@ describe("priceSpec lines and totals", () => {
       },
     ],
     ["a spec with missing parts", { dialId: "nope", strapId: "" }],
+    ["a spare strap and every add-on", { extras: { spareStrapId: "nato", itemIds: EXTRAS.map((extra) => extra.id) } }],
+    ["unknown extras", { extras: { spareStrapId: "strap-nope", itemIds: ["extra-nope"] } }],
   ])("add up exactly for %s", (_, changes) => {
     const result = quote(changes);
     expect(centsOf(result.lines, "part")).toBe(cents(result.partsCostEur));
     expect(centsOf(result.lines, "personalization")).toBe(cents(result.personalizationCostEur));
+    expect(centsOf(result.lines, "extra")).toBe(cents(result.extrasCostEur));
     expect(centsOf(result.lines, "labour", "qc")).toBe(cents(result.labourCostEur));
     expect(centsOf(result.lines, "overhead")).toBe(cents(result.overheadCostEur));
-    expect(centsOf(result.lines, "part", "personalization", "labour", "qc", "overhead")).toBe(cents(result.totalCostEur));
+    expect(centsOf(result.lines, "part", "personalization", "extra", "labour", "qc", "overhead")).toBe(cents(result.totalCostEur));
+    expect(
+      cents(result.partsCostEur) +
+        cents(result.personalizationCostEur) +
+        cents(result.extrasCostEur) +
+        cents(result.labourCostEur) +
+        cents(result.overheadCostEur),
+    ).toBe(cents(result.totalCostEur));
     for (const line of result.lines) expect(Math.abs(line.amountEur * 100 - cents(line.amountEur))).toBeLessThan(1e-6);
   });
 
@@ -225,5 +236,90 @@ describe("missing parts", () => {
     expect(empty.partsCostEur).toBe(0);
     expect(empty.labourCostEur).toBe(labourFor(BENCH_MINUTES.base) + PRICING_CONFIG.qcEur);
     expect(empty.leadTimeDays).toBe(PRICING_CONFIG.benchAndQcDays);
+  });
+});
+
+describe("extras", () => {
+  const extra = (id: string) => {
+    const found = EXTRAS.find((candidate) => candidate.id === id);
+    if (!found) throw new Error(`No extra ${id}`);
+    return found;
+  };
+  const box = extra("extra-presentation-box");
+  const pouch = extra("extra-travel-pouch");
+  const tool = extra("extra-spring-bar-tool");
+  const giftWrap = extra("extra-gift-wrap");
+  const regulation = extra("extra-fine-regulation");
+  const everything = { spareStrapId: "nato", itemIds: EXTRAS.map((candidate) => candidate.id) };
+
+  it("prices a line for the spare strap and one per add-on, in catalogue order", () => {
+    const result = quote({ extras: everything });
+    expect(result.lines.filter((line) => line.kind === "extra")).toEqual([
+      { label: "Spare strap: Test NATO", kind: "extra", amountEur: 9.5 },
+      ...EXTRAS.map((candidate) => ({ label: candidate.name, kind: "extra", amountEur: candidate.costEur })),
+    ]);
+    expect(result.extrasCostEur).toBe(9.5 + EXTRAS.reduce((total, candidate) => total + candidate.costEur, 0));
+    expect(result.partsCostEur).toBe(PARTS_COST);
+  });
+
+  it("charges the extras' bench time as labour, on a line of its own", () => {
+    const plain = quote();
+    const result = quote({ extras: { spareStrapId: "nato", itemIds: [giftWrap.id, regulation.id] } });
+    const minutes = BENCH_MINUTES.spareStrap + giftWrap.benchMinutes + regulation.benchMinutes;
+    const labour = result.lines.filter((line) => line.kind === "labour");
+    expect(labour.map((line) => line.label)).toEqual([
+      `Assembly labour: ${BENCH_MINUTES.base} min at €${PRICING_CONFIG.labourRateEurPerHour}/h`,
+      `Bench time for extras: ${minutes} min at €${PRICING_CONFIG.labourRateEurPerHour}/h`,
+    ]);
+    expect(result.labourCostEur - plain.labourCostEur).toBeCloseTo(labourFor(minutes), 2);
+    expect(quote({ extras: { spareStrapId: null, itemIds: [box.id] } }).lines.filter((line) => line.kind === "labour")).toHaveLength(1);
+  });
+
+  it("sizes a spare bracelet like one on the watch", () => {
+    const labour = (spareStrapId: string) =>
+      quote({ extras: { spareStrapId, itemIds: [] } }).lines.find((line) => line.label.startsWith("Bench time for extras"))?.amountEur;
+    expect(labour("bracelet")).toBe(labourFor(BENCH_MINUTES.spareStrap + BENCH_MINUTES.braceletSizing));
+  });
+
+  it("counts the spare strap and each bought-in add-on as an inbound parcel, but not stock or bench services", () => {
+    const inbound = (extras: WatchSpec["extras"]) =>
+      quote({ extras }).lines.find((line) => line.label.startsWith("Inbound shipping"));
+    const perPart = PRICING_CONFIG.overhead.inboundShippingEurPerPart;
+    expect(inbound({ spareStrapId: null, itemIds: [giftWrap.id, regulation.id] })).toEqual(inbound(undefined));
+    expect(inbound({ spareStrapId: "nato", itemIds: [] })).toEqual({
+      label: `Inbound shipping: 7 parcels (6 parts, 1 extra) at €${perPart}`,
+      kind: "overhead",
+      amountEur: 7 * perPart,
+    });
+    const bought = [box, pouch, tool].filter((candidate) => candidate.leadTimeDays > 0).length;
+    expect(inbound(everything)?.label).toBe(`Inbound shipping: ${7 + bought} parcels (6 parts, ${1 + bought} extras) at €${perPart}`);
+  });
+
+  it("keeps the warranty reserve on the watch's parts only", () => {
+    const reserve = (changes: Partial<WatchSpec>) => quote(changes).lines.find((line) => line.label.startsWith("Warranty reserve"));
+    expect(reserve({ extras: everything })).toEqual(reserve({}));
+  });
+
+  it("waits for the slowest extra when it comes in after the parts", () => {
+    const { benchAndQcDays } = PRICING_CONFIG;
+    expect(quote({ extras: { spareStrapId: null, itemIds: [box.id] } }).leadTimeDays).toBe(Math.max(14, box.leadTimeDays) + benchAndQcDays);
+    expect(quote({ extras: { spareStrapId: "nato", itemIds: [] } }).leadTimeDays).toBe(20 + benchAndQcDays);
+    // Printing waits for its dial; the spare strap only has to be in by then.
+    const printed = { personalization: { dialText: "Est. 2026", casebackEngraving: "" } };
+    const dialPrinting = PRICING_CONFIG.personalization.dialText.leadTimeDays;
+    expect(quote({ ...printed, extras: { spareStrapId: "nato", itemIds: [] } }).leadTimeDays).toBe(
+      Math.max(14 + dialPrinting, 20) + benchAndQcDays,
+    );
+  });
+
+  it("prices unknown extras at nothing instead of throwing, and treats no extras as before", () => {
+    const plain = quote();
+    expect(plain.extrasCostEur).toBe(0);
+    expect(quote({ extras: { spareStrapId: null, itemIds: [] } })).toEqual(plain);
+    expect(quote({ extras: { spareStrapId: "strap-nope", itemIds: ["extra-nope"] } })).toEqual(plain);
+  });
+
+  it("raises the price the customer pays", () => {
+    expect(quote({ extras: everything }).retailInclVatEur).toBeGreaterThan(quote().retailInclVatEur);
   });
 });

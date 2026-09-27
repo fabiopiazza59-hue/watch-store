@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const isDev = process.env.NODE_ENV === "development";
+/**
+ * STATIC_EXPORT=1 builds the static demo for GitHub Pages (see scripts/build-pages.mjs): no server,
+ * so no API routes, orders or response headers; the designer runs offline in the browser.
+ */
+const staticExport = process.env.STATIC_EXPORT === "1";
 /** Set PUBLIC_ORIGIN (at build time) to the site's https:// address to also send the HTTPS-only headers. */
 const servedOverHttps = process.env.PUBLIC_ORIGIN?.trim().startsWith("https://") ?? false;
 
@@ -31,11 +36,19 @@ const securityHeaders = [
   ...(servedOverHttps ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }] : []),
 ];
 
-const nextConfig: NextConfig = {
-  poweredByHeader: false,
-  async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
-  },
-};
+const nextConfig: NextConfig = staticExport
+  ? {
+      output: "export",
+      basePath: process.env.PAGES_BASE_PATH ?? "",
+      trailingSlash: true,
+      images: { unoptimized: true },
+      env: { NEXT_PUBLIC_STATIC_DEMO: "1" },
+    }
+  : {
+      poweredByHeader: false,
+      async headers() {
+        return [{ source: "/:path*", headers: securityHeaders }];
+      },
+    };
 
 export default nextConfig;

@@ -1,7 +1,8 @@
 // The single source of truth for "can this watch be built?". Rules are listed in
 // docs/feasibility-rules.md and implemented in ./checks; everything here is pure and deterministic.
-import { CATALOG, getSlotDef, NONE_OPTION_ID, partsForSlot, TEMPLATES } from "../catalog";
+import { CATALOG, getSlotDef, NONE_OPTION_ID, partsForSlot, resolveSpec, specExtras, TEMPLATES } from "../catalog";
 import type { Catalog, OptionStatus, RepairResult, SlotKey, ValidationReport, WatchSpec } from "../types";
+import { spareStrap } from "./checks/extras";
 import { collectFindings, toIssue, withPart } from "./engine";
 import { suggestFixes } from "./fixes";
 import { repair, repairAround as repairAroundLoop, repairKeepingParts } from "./repair";
@@ -65,12 +66,20 @@ export function repairKeeping(spec: WatchSpec, lockedSlots: readonly SlotKey[], 
 }
 
 /**
- * CONTRACT STUB (extras): for each strap in the catalogue, whether it can be the spare strap for
- * `spec` (same `OptionStatus` shape as evaluateOptions; issues are the `spare-strap` errors/warnings
- * choosing it would cause). The first option is NONE_OPTION_ID, meaning no spare strap.
+ * For each strap in the catalogue (catalogue order), whether it can be the spare strap for `spec`: the
+ * same `OptionStatus` shape as evaluateOptions, with the `spare-strap` errors and warnings choosing it
+ * would cause (without fixes). The first option is NONE_OPTION_ID, meaning no spare strap. The info
+ * that a strap is the same as the main one is left out: compare `partId` with `spec.strapId` for that.
  */
 export function evaluateSpareStraps(spec: WatchSpec, catalog: Catalog = CATALOG): OptionStatus[] {
-  void spec;
-  void catalog;
-  throw new Error("evaluateSpareStraps: not implemented");
+  const parts = resolveSpec(spec, catalog);
+  const { itemIds } = specExtras(spec);
+  const options = [{ partId: NONE_OPTION_ID, value: null }, ...catalog.straps.map((strap) => ({ partId: strap.id, value: strap.id }))];
+  return options.map(({ partId, value }) => {
+    const candidate: WatchSpec = { ...spec, extras: { spareStrapId: value, itemIds } };
+    const issues = spareStrap({ spec: candidate, parts, catalog })
+      .filter((f) => f.severity !== "info")
+      .map((f) => toIssue(f, []));
+    return { partId, compatible: !issues.some((issue) => issue.severity === "error"), issues };
+  });
 }

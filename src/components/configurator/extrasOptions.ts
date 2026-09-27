@@ -51,6 +51,8 @@ export interface SpareStrapOption {
   fit: Fit;
   /** The issue that best explains the fit. */
   reason?: Issue;
+  /** The same strap the watch comes on: a like-for-like replacement rather than a change of look. */
+  sameAsWatch: boolean;
   /** How choosing it moves the customer's price. */
   priceDeltaEur: number;
 }
@@ -70,6 +72,7 @@ export function spareStrapOptions(
       strap: strapId ? CATALOG.straps.find((strap) => strap.id === strapId) : undefined,
       fit: fitOf(status),
       reason: leadIssue(status),
+      sameAsWatch: strapId !== null && strapId === spec.strapId,
       priceDeltaEur: retail(withExtras(spec, setSpareStrap(extras, strapId))) - currentPrice,
     };
   });

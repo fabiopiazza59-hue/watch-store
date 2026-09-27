@@ -218,7 +218,7 @@ function TemplatePicker({ spec, onReplace }: Pick<PreviewStageProps, "spec" | "o
       <p className="mt-2 min-h-5 text-xs text-ink-faint">
         {active
           ? active.description
-          : "Every starting design is buildable as it comes. Your name, dial text and engraving are kept."}
+          : "Every starting design is buildable as it comes. Your name, dial text, engraving and extras are kept."}
       </p>
     </div>
   );

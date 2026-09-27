@@ -32,4 +32,26 @@ describe("QuoteBreakdown", () => {
     expect(markup).not.toContain("Price excl. VAT");
     expect(markup).toContain("Your price, no VAT charged");
   });
+
+  describe("extras", () => {
+    const extraLines = [
+      { label: "Spare strap: Navy NATO 22mm", kind: "extra" as const, amountEur: 12.34 },
+      { label: "Presentation box", kind: "extra" as const, amountEur: 11.11 },
+    ];
+    const withExtras = { ...quote, lines: [...quote.lines, ...extraLines], extrasCostEur: 23.45 };
+
+    it("lists them for the customer as their own group, without the workshop's costs", () => {
+      const markup = renderToStaticMarkup(<QuoteBreakdown quote={withExtras} variant="customer" />);
+      expect(markup).toMatch(/>Extras<\/p><ul[^>]*><li>Spare strap: Navy NATO 22mm<\/li><li>Presentation box<\/li>/);
+      expect(markup).not.toContain(formatCost(12.34));
+      expect(renderToStaticMarkup(<QuoteBreakdown quote={quote} variant="customer" />)).not.toContain("Extras");
+    });
+
+    it("gives the workshop an Extras group with its subtotal", () => {
+      const markup = renderToStaticMarkup(<QuoteBreakdown quote={withExtras} variant="workshop" />);
+      expect(markup).toContain(">Extras</th>");
+      expect(markup).toContain(formatCost(12.34));
+      expect(markup).toContain(formatCost(23.45));
+    });
+  });
 });

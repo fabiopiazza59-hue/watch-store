@@ -1,5 +1,6 @@
 import { useRouter } from "next/navigation";
 import { type FormEvent, type Ref, useEffect, useId, useRef, useState } from "react";
+import { resolveExtras } from "@/domain/catalog";
 import { ORDER_LIMITS } from "@/domain/schemas";
 import type { PriceQuote, ResolvedSpec, ValidationReport, WatchSpec } from "@/domain/types";
 import { ApiError, placeOrder } from "../apiClient";
@@ -212,16 +213,20 @@ function OrderForm({ spec, parts, report, quote, showPreview, nameRef, onCancel 
   );
 }
 
-/** What is being ordered, at a glance: the watch, its main parts and any personal text. */
+/** What is being ordered, at a glance: the watch, its main parts, any personal text and the extras. */
 function OrderSummary({ spec, parts, showPreview }: { spec: WatchSpec; parts: ResolvedSpec; showPreview: boolean }) {
   const { dialText, casebackEngraving } = spec.personalization;
+  const extras = resolveExtras(spec);
   const rows = [
     { label: "Case", value: parts.case?.name },
     { label: "Dial", value: parts.dial?.name },
     { label: "Strap", value: parts.strap?.name },
     { label: "Dial text", value: dialText.trim() && `“${dialText.trim()}”` },
     { label: "Engraving", value: casebackEngraving.trim() && `“${casebackEngraving.trim()}”` },
-  ].filter((row): row is { label: string; value: string } => Boolean(row.value));
+    { label: "Spare strap", value: extras.spareStrap?.name },
+    // Several names, so this one wraps rather than being cut short.
+    { label: "Add-ons", value: extras.items.map((item) => item.name).join(", "), wrap: true },
+  ].filter((row): row is { label: string; value: string; wrap?: boolean } => Boolean(row.value));
 
   return (
     <div className="flex items-center gap-4 rounded-lg bg-surface-muted p-3">
@@ -231,10 +236,10 @@ function OrderSummary({ spec, parts, showPreview }: { spec: WatchSpec; parts: Re
         )}
       </div>
       <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-sm">
-        {rows.map(({ label, value }) => (
+        {rows.map(({ label, value, wrap }) => (
           <div key={label} className="contents">
             <dt className="text-ink-faint">{label}</dt>
-            <dd className="truncate text-ink">{value}</dd>
+            <dd className={wrap ? "text-ink" : "truncate text-ink"}>{value}</dd>
           </div>
         ))}
       </dl>

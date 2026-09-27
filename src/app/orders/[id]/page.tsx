@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BuildSheetView } from "@/components/orders/BuildSheetView";
-import { type CatalogueChange, orderParts } from "@/components/orders/orderParts";
+import { type CatalogueChange, orderExtras, orderParts } from "@/components/orders/orderParts";
 import { PrintButton } from "@/components/orders/PrintButton";
 import { SpecSummary } from "@/components/orders/SpecSummary";
 import { StatusSelector } from "@/components/orders/StatusSelector";
@@ -12,6 +12,7 @@ import { QuoteBreakdown } from "@/components/quote/QuoteBreakdown";
 import { formatDateTime, formatPrice, mailtoHref, plural, vatNote } from "@/components/ui/format";
 import { AlertIcon } from "@/components/ui/icons";
 import { cardClass, eyebrowClass } from "@/components/ui/styles";
+import { specExtras } from "@/domain/catalog";
 import type { Order } from "@/domain/types";
 import { CorruptOrderError, getOrder } from "@/server/orders";
 import { canSeeWorkshop } from "../workshopGate";
@@ -87,7 +88,7 @@ export default async function OrderPage({ params }: OrderPageProps) {
           </div>
           <h2 className="mt-5 font-display text-xl font-semibold text-ink">Specification</h2>
           <div className="mt-2">
-            <SpecSummary spec={order.spec} parts={parts} orderedNames={orderedNames} />
+            <SpecSummary spec={order.spec} parts={parts} orderedNames={orderedNames} extras={orderExtras(order)} />
           </div>
         </section>
 
@@ -124,7 +125,7 @@ export default async function OrderPage({ params }: OrderPageProps) {
       </div>
 
       <div className="mt-8">
-        <BuildSheetView sheet={order.buildSheet} orderId={order.id} />
+        <BuildSheetView sheet={order.buildSheet} orderId={order.id} spareStrapId={specExtras(order.spec).spareStrapId} />
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import type { Rule } from "../model";
 import { crystalMaterial, lumeMatch, styleCoherence } from "./advice";
 import { dateWindow, dialCenterHole, dialCrownPosition, dialSize } from "./dial";
+import { extrasItems, spareStrap } from "./extras";
 import { bezelInsert, bezelScale, crystalFit, strapWidth } from "./exterior";
 import { gmtHand, handClearance, handFit, handLength } from "./hands";
 import { missingParts, movementFamily } from "./parts";
@@ -24,6 +25,8 @@ export const RULES: Rule[] = [
   handClearance,
   dialText,
   casebackEngraving,
+  spareStrap,
+  extrasItems,
   lumeMatch,
   crystalMaterial,
   styleCoherence,

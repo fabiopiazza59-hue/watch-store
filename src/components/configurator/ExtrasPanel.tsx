@@ -215,7 +215,9 @@ function SpareStrapRow({ option, name, selected, problem, onChoose }: SpareStrap
             {option.strapId !== null && <FitBadge fit={fit} />}
           </span>
           <span className="mt-0.5 block text-xs text-ink-faint">
-            {strap ? partHighlights(strap).join(" · ") : "Just the strap on the watch"}
+            {strap
+              ? [...partHighlights(strap), ...(option.sameAsWatch ? ["same as on the watch"] : [])].join(" · ")
+              : "Just the strap on the watch"}
           </span>
           {explanation && (
             <span

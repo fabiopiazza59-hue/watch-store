@@ -1,4 +1,4 @@
-import { getSlotDef } from "@/domain/catalog";
+import { CATALOG, getSlotDef } from "@/domain/catalog";
 import type { BomLine, BuildSheet } from "@/domain/types";
 import { formatCost, formatDuration } from "../ui/format";
 import { WrenchIcon } from "../ui/icons";
@@ -6,8 +6,20 @@ import { cardClass, eyebrowClass } from "../ui/styles";
 import { AssemblySteps } from "./AssemblySteps";
 import { Checklist } from "./Checklist";
 
-function bomSlotLabel(line: BomLine): string {
-  return line.slot === "personalization" ? "Personalization" : getSlotDef(line.slot).label;
+/**
+ * "Dial", "Personalization", "Spare strap" or "Extra". A spare strap is told from the other extras by
+ * the order's spare strap id when it is given, else by being a strap in the catalogue.
+ */
+export function bomSlotLabel(line: BomLine, spareStrapId?: string | null): string {
+  if (line.slot === "personalization") return "Personalization";
+  if (line.slot === "extra") {
+    const spare =
+      spareStrapId === undefined
+        ? CATALOG.straps.some((strap) => strap.id === line.partId)
+        : line.partId !== null && line.partId === spareStrapId;
+    return spare ? "Spare strap" : "Extra";
+  }
+  return getSlotDef(line.slot).label;
 }
 
 function bomKey(line: BomLine, index: number): string {
@@ -20,10 +32,12 @@ interface BuildSheetViewProps {
   sheet: BuildSheet;
   /** Keeps this order's ticks apart from other orders' in the browser. */
   orderId: string;
+  /** The order's spare strap, so its line reads "Spare strap" rather than "Extra". */
+  spareStrapId?: string | null;
 }
 
 /** The watchmaker's instructions for one order, laid out to work on screen and on paper. */
-export function BuildSheetView({ sheet, orderId }: BuildSheetViewProps) {
+export function BuildSheetView({ sheet, orderId, spareStrapId }: BuildSheetViewProps) {
   const bomTotal = sheet.bom.reduce((total, line) => total + line.qty * line.unitCostEur, 0);
 
   return (
@@ -47,7 +61,7 @@ export function BuildSheetView({ sheet, orderId }: BuildSheetViewProps) {
         <ul className="mt-3 divide-y divide-line sm:hidden print:hidden">
           {sheet.bom.map((line, index) => (
             <li key={bomKey(line, index)} className="py-3">
-              <p className="text-xs font-medium tracking-[0.08em] text-ink-faint uppercase">{bomSlotLabel(line)}</p>
+              <p className="text-xs font-medium tracking-[0.08em] text-ink-faint uppercase">{bomSlotLabel(line, spareStrapId)}</p>
               <p className="mt-0.5 font-medium text-ink">{line.name}</p>
               {line.partId && <p className="font-mono text-xs break-all text-ink-faint">{line.partId}</p>}
               <p className="mt-1 text-xs leading-relaxed text-ink-soft">{line.supplierHint}</p>
@@ -86,7 +100,7 @@ export function BuildSheetView({ sheet, orderId }: BuildSheetViewProps) {
             <tbody className="divide-y divide-line">
               {sheet.bom.map((line, index) => (
                 <tr key={bomKey(line, index)} className="align-top">
-                  <td className="py-2.5 pr-4 whitespace-nowrap text-ink-soft">{bomSlotLabel(line)}</td>
+                  <td className="py-2.5 pr-4 whitespace-nowrap text-ink-soft">{bomSlotLabel(line, spareStrapId)}</td>
                   <td className="py-2.5 pr-4">
                     <span className="font-medium text-ink">{line.name}</span>
                     {line.partId && <span className="ml-2 font-mono text-xs text-ink-faint">{line.partId}</span>}

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { createBuildSheet } from "@/domain/buildSheet";
-import { TEMPLATES } from "@/domain/catalog";
+import { EXTRAS, resolveExtras, TEMPLATES } from "@/domain/catalog";
 import { priceSpec } from "@/domain/pricing";
 import type { Order } from "@/domain/types";
 import { formatPrice } from "../ui/format";
@@ -36,5 +36,20 @@ describe("OrderConfirmation", () => {
     expect(markup).not.toContain("sam@example.com");
     expect(markup).not.toContain("Needed by 10 June");
     for (const line of order.buildSheet.bom) expect(markup).not.toContain(line.supplierHint);
+  });
+
+  it("shows the extras ordered, as the order's copy has them", () => {
+    const withExtras = { ...spec, extras: { spareStrapId: "strap-leather-black-20", itemIds: [EXTRAS[0].id] } };
+    const copy = resolveExtras(withExtras);
+    const extrasOrder: Order = {
+      ...order,
+      spec: withExtras,
+      extras: { ...copy, items: copy.items.map((item) => ({ ...item, name: "Walnut presentation box" })) },
+    };
+    const extrasMarkup = renderToStaticMarkup(<OrderConfirmation order={extrasOrder} />);
+    expect(extrasMarkup).toContain("Spare strap");
+    expect(extrasMarkup).toContain("Black leather 20mm");
+    expect(extrasMarkup).toContain("Walnut presentation box");
+    expect(extrasMarkup).not.toContain(EXTRAS[0].supplierHint);
   });
 });

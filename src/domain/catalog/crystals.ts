@@ -110,6 +110,20 @@ export const crystals: Crystal[] = [
     leadTimeDays: 14,
     supplierHint: "29.5mm double-dome sapphire (1.5mm edge, 3mm overall) for the dress-pattern NH cases.",
   },
+  {
+    id: "crystal-sapphire-flat-295-thin",
+    category: "crystal",
+    name: "Sapphire flat 29.5mm, thin",
+    description: "1mm flat sapphire with inner AR coating, made for the ultra-thin 36mm field case.",
+    material: "sapphire",
+    shape: "flat",
+    diameterMm: 29.5,
+    thicknessMm: 1,
+    arCoating: "inner",
+    costEur: 18,
+    leadTimeDays: 14,
+    supplierHint: "29.5 x 1.0mm flat sapphire, supplied fitted to the ultra-thin 36mm field-pattern case; spares from the case maker.",
+  },
 
   // --- 34.5mm: wide-dial pilot and titanium field cases ---
   {

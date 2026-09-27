@@ -9,9 +9,10 @@ export interface RuleContext {
 
 /**
  * One way to look for fixes, in order of preference: swap the part in a slot for catalogue
- * alternatives, or apply a fixed patch (clear a text, remove an insert).
+ * alternatives, swap the spare strap for other straps, or apply a fixed patch (clear a text,
+ * remove an insert).
  */
-export type Remedy = { swap: SlotKey } | { patch: SuggestedFix };
+export type Remedy = { swap: SlotKey } | { swapSpareStrap: true } | { patch: SuggestedFix };
 
 /** An issue as a rule reports it, before fixes are searched for. */
 export interface Finding {

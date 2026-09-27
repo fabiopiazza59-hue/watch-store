@@ -1,7 +1,14 @@
 // Cost breakdown, consumer price and lead time for one watch. Part costs live in the catalogue;
 // everything else the workshop spends per watch is set in PRICING_CONFIG.
-import { estimateBenchMinutes, partsBySlot, PERSONALIZATION_SERVICES, requestedPersonalization } from "./buildSheet";
-import { CATALOG, resolveSpec } from "./catalog";
+import {
+  estimateBenchMinutes,
+  extraLines,
+  extrasBenchMinutes,
+  partsBySlot,
+  PERSONALIZATION_SERVICES,
+  requestedPersonalization,
+} from "./buildSheet";
+import { CATALOG, resolveExtras, resolveSpec } from "./catalog";
 import type { Catalog, PriceLine, PriceQuote, WatchSpec } from "./types";
 
 /** Per-watch costs and pricing policy. All money is EUR excluding VAT unless a name says otherwise. */
@@ -20,6 +27,7 @@ export const PRICING_CONFIG = {
     /**
      * Inbound shipping and import handling per part, as a first approximation that each part of a one-off
      * build arrives as its own parcel from a different shop. Revisit it once real supplier invoices exist.
+     * Extras bought in for the order (a spare strap, a box) count as a parcel each too.
      */
     inboundShippingEurPerPart: 4,
     /** Insured, tracked shipping to the customer. */
@@ -62,8 +70,21 @@ interface CentLine {
   cents: number;
 }
 
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function inboundLabel(partParcels: number, extraParcels: number, perParcelEur: number): string {
+  if (extraParcels === 0) return `Inbound shipping: ${partParcels} part ${partParcels === 1 ? "parcel" : "parcels"} at €${perParcelEur}`;
+  return (
+    `Inbound shipping: ${plural(partParcels + extraParcels, "parcel")} ` +
+    `(${plural(partParcels, "part")}, ${plural(extraParcels, "extra")}) at €${perParcelEur}`
+  );
+}
+
 /**
- * Cost breakdown, consumer price and lead time for one unit. Pure; unknown parts add nothing.
+ * Cost breakdown, consumer price and lead time for one unit and its extras. Pure; unknown parts and
+ * extras add nothing.
  *
  * The consumer price includes VAT and ends in 9. It is the smallest such price whose share excluding VAT
  * keeps the target margin after every cost, the payment fee included (charged on the price paid).
@@ -72,8 +93,19 @@ export function priceSpec(spec: WatchSpec, catalog: Catalog = CATALOG): PriceQuo
   const { labourRateEurPerHour, qcEur, overhead, vatRatePct, targetGrossMarginPct, benchAndQcDays } = PRICING_CONFIG;
   const parts = partsBySlot(spec, catalog).flatMap(({ def, part }) => (part ? [{ label: def.label, part }] : []));
   const services = requestedPersonalization(spec.personalization);
-  const benchMinutes = estimateBenchMinutes(resolveSpec(spec, catalog), spec.personalization);
+  const extras = resolveExtras(spec, catalog);
+  const ordered = extraLines(extras);
+  const benchMinutes = estimateBenchMinutes(resolveSpec(spec, catalog), spec.personalization, extras);
+  // Bench time for the extras gets a line of its own, so the watch's assembly labour reads as before.
+  const extrasMinutes = extrasBenchMinutes(extras);
+  const assemblyMinutes = benchMinutes - extrasMinutes;
+  const parcels = parts.length + ordered.filter((line) => line.parcel).length;
   const partsCents = sum(parts.map(({ part }) => toCents(part.costEur)));
+  const labourCents = (minutes: number) => toCents((minutes / 60) * labourRateEurPerHour);
+  const extrasLabour: CentLine[] =
+    extrasMinutes > 0
+      ? [{ label: `Bench time for extras: ${extrasMinutes} min at €${labourRateEurPerHour}/h`, kind: "labour", cents: labourCents(extrasMinutes) }]
+      : [];
 
   // Money is kept in whole cents so the lines add up to the totals exactly.
   const lines: CentLine[] = [
@@ -83,17 +115,19 @@ export function priceSpec(spec: WatchSpec, catalog: Catalog = CATALOG): PriceQuo
       kind: "personalization",
       cents: toCents(service.costEur),
     })),
+    ...ordered.map((line): CentLine => ({ label: line.label, kind: "extra", cents: toCents(line.costEur) })),
     {
-      label: `Assembly labour: ${benchMinutes} min at €${labourRateEurPerHour}/h`,
+      label: `Assembly labour: ${assemblyMinutes} min at €${labourRateEurPerHour}/h`,
       kind: "labour",
-      cents: toCents((benchMinutes / 60) * labourRateEurPerHour),
+      cents: labourCents(assemblyMinutes),
     },
+    ...extrasLabour,
     { label: "QC: timegrapher regulation and pressure test", kind: "qc", cents: toCents(qcEur) },
     { label: "Packaging", kind: "overhead", cents: toCents(overhead.packagingEur) },
     {
-      label: `Inbound shipping: ${parts.length} part ${parts.length === 1 ? "parcel" : "parcels"} at €${overhead.inboundShippingEurPerPart}`,
+      label: inboundLabel(parts.length, parcels - parts.length, overhead.inboundShippingEurPerPart),
       kind: "overhead",
-      cents: parts.length * toCents(overhead.inboundShippingEurPerPart),
+      cents: parcels * toCents(overhead.inboundShippingEurPerPart),
     },
     { label: "Insured, tracked shipping to the customer", kind: "overhead", cents: toCents(overhead.outboundShippingEur) },
     { label: "Consumables and a spare stem", kind: "overhead", cents: toCents(overhead.consumablesEur) },
@@ -126,12 +160,16 @@ export function priceSpec(spec: WatchSpec, catalog: Catalog = CATALOG): PriceQuo
   const slowestPartDays = Math.max(0, ...parts.map(({ part }) => part.leadTimeDays));
   // Printing and engraving run in parallel, after their part arrives, which may be the last one in.
   const personalizationDays = Math.max(0, ...services.map((service) => service.leadTimeDays));
+  // Extras are ordered with the parts and counted as due before the bench starts, to be safe: the
+  // spare strap is checked against the case, and everything is packed at the end.
+  const slowestExtraDays = Math.max(0, ...ordered.map((line) => line.leadTimeDays));
 
   return {
     currency: "EUR",
     lines: lines.map(({ label, kind, cents }) => ({ label, kind, amountEur: fromCents(cents) })),
     partsCostEur: fromCents(centsOf("part")),
     personalizationCostEur: fromCents(centsOf("personalization")),
+    extrasCostEur: fromCents(centsOf("extra")),
     labourCostEur: fromCents(centsOf("labour", "qc")),
     overheadCostEur: fromCents(centsOf("overhead")),
     totalCostEur: fromCents(totalCents),
@@ -140,6 +178,6 @@ export function priceSpec(spec: WatchSpec, catalog: Catalog = CATALOG): PriceQuo
     vatEur: fromCents(grossCents - netCents),
     retailInclVatEur,
     marginPct,
-    leadTimeDays: slowestPartDays + personalizationDays + benchAndQcDays,
+    leadTimeDays: Math.max(slowestPartDays + personalizationDays, slowestExtraDays) + benchAndQcDays,
   };
 }

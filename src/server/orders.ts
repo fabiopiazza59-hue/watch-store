@@ -5,12 +5,12 @@ import { link, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/p
 import path from "node:path";
 import { z } from "zod";
 import { createBuildSheet } from "@/domain/buildSheet";
-import { resolveSpec } from "@/domain/catalog";
+import { resolveExtras, resolveSpec, specExtras } from "@/domain/catalog";
 import { priceSpec } from "@/domain/pricing";
 import { normalizePersonalization, validateSpec } from "@/domain/rules";
 import { isOrderStatus, ORDER_STATUSES } from "@/domain/orderStatus";
 import { ORDER_LIMITS, ORDER_MESSAGES, orderSchema } from "@/domain/schemas";
-import type { Customer, Order, OrderStatus, ValidationReport, WatchSpec } from "@/domain/types";
+import type { Customer, Order, OrderStatus, ResolvedExtras, ValidationReport, WatchSpec } from "@/domain/types";
 
 export interface CreateOrderInput {
   spec: WatchSpec;
@@ -207,11 +207,20 @@ function validateInput(input: CreateOrderInput): { customer: Customer; notes: st
   return { customer: { name, email }, notes };
 }
 
+/** The extras as the catalogues describe them today, or undefined when the spec has none. */
+function extrasSnapshot(spec: WatchSpec): ResolvedExtras | undefined {
+  const { spareStrapId, itemIds } = specExtras(spec);
+  if (!spareStrapId && itemIds.length === 0) return undefined;
+  const { spareStrap, items } = resolveExtras(spec);
+  return spareStrap ? { spareStrap, items } : { items };
+}
+
 /**
  * Validates the spec (rejects unbuildable specs), prices it, builds the build sheet and persists
- * it under a fresh id, with a copy of its parts as the catalogue describes them today. Typographic
- * apostrophes and dashes in the personal texts are made plain first, whichever way the spec came
- * (configurator, share link, API). Throws OrderCapacityError once the day's order limit is reached.
+ * it under a fresh id, with a copy of its parts and extras as the catalogues describe them today.
+ * Typographic apostrophes and dashes in the personal texts are made plain first, whichever way the
+ * spec came (configurator, share link, API). Throws OrderCapacityError once the day's order limit is
+ * reached.
  */
 export async function createOrder(input: CreateOrderInput): Promise<Order> {
   const { customer, notes } = validateInput(input);
@@ -221,6 +230,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 
   const now = new Date();
   await ensureCapacity(now);
+  const extras = extrasSnapshot(spec);
   const details: Omit<Order, "id"> = {
     createdAt: now.toISOString(),
     status: "received",
@@ -228,6 +238,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     notes,
     spec,
     parts: resolveSpec(spec),
+    ...(extras ? { extras } : {}),
     quote: priceSpec(spec),
     buildSheet: createBuildSheet(spec),
   };

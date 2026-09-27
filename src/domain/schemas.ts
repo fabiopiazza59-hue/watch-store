@@ -9,10 +9,13 @@ import type {
   ChatTurn,
   Customer,
   DesignRequest,
+  Extra,
   Order,
+  OrderExtras,
   OrderStatus,
   Part,
   PriceQuote,
+  ResolvedExtras,
   ResolvedSpec,
   WatchSpec,
 } from "./types";
@@ -22,6 +25,8 @@ const MAX_PART_ID_LENGTH = 100;
 const MAX_PERSONALIZATION_LENGTH = 200;
 const MAX_CUSTOMER_FIELD_LENGTH = 500;
 const MAX_NOTES_LENGTH = 2000;
+/** More add-ons than the extras catalogue holds, with room for it to grow. */
+export const MAX_EXTRA_ITEMS = 10;
 
 export const DESIGN_NAME_MAX_LENGTH = 60;
 export const DESIGN_MESSAGE_MAX_LENGTH = 2000;
@@ -68,6 +73,24 @@ export function clampDesignName(name: string): string {
 
 const partIdSchema = z.string().max(MAX_PART_ID_LENGTH);
 
+/**
+ * Catalogue ids are lower-case slugs ("strap-nato-olive-20"). Whether one exists is the rules engine's
+ * call, which can explain it; this only keeps other text out of the extras.
+ */
+const catalogIdSchema = z
+  .string()
+  .max(MAX_PART_ID_LENGTH)
+  .regex(/^[a-z0-9][a-z0-9.-]*$/, "Expected a catalogue id.");
+
+export const orderExtrasSchema = z.object({
+  // An empty id means no spare strap, as null does.
+  spareStrapId: z.union([z.literal("").transform(() => null), catalogIdSchema]).nullable(),
+  itemIds: z
+    .array(catalogIdSchema)
+    .max(MAX_EXTRA_ITEMS)
+    .refine((ids) => new Set(ids).size === ids.length, "Each add-on can be added once."),
+}) satisfies z.ZodType<OrderExtras>;
+
 export const personalizationSchema = z.object({
   dialText: z.string().max(MAX_PERSONALIZATION_LENGTH),
   casebackEngraving: z.string().max(MAX_PERSONALIZATION_LENGTH),
@@ -84,6 +107,8 @@ export const watchSpecSchema = z.object({
   bezelInsertId: partIdSchema.nullable().transform((id) => (id === "" ? null : id)),
   strapId: partIdSchema,
   personalization: personalizationSchema,
+  // Absent on designs, links and orders from before extras existed: no extras.
+  extras: orderExtrasSchema.optional(),
 }) satisfies z.ZodType<WatchSpec>;
 
 export const customerSchema = z.object({
@@ -136,12 +161,14 @@ const priceQuoteSchema = z
     lines: z.array(
       z.looseObject({
         label: z.string(),
-        kind: z.enum(["part", "personalization", "labour", "qc", "overhead"]),
+        kind: z.enum(["part", "personalization", "extra", "labour", "qc", "overhead"]),
         amountEur: z.number(),
       }),
     ),
     partsCostEur: z.number(),
     personalizationCostEur: z.number(),
+    // Quotes from before extras existed had none.
+    extrasCostEur: z.number().default(0),
     labourCostEur: z.number(),
     overheadCostEur: z.number(),
     totalCostEur: z.number(),
@@ -165,7 +192,17 @@ const buildSheetSchema = z.looseObject({
   summary: z.string(),
   bom: z.array(
     z.looseObject({
-      slot: z.enum(["movementId", "caseId", "dialId", "handsId", "crystalId", "bezelInsertId", "strapId", "personalization"]),
+      slot: z.enum([
+        "movementId",
+        "caseId",
+        "dialId",
+        "handsId",
+        "crystalId",
+        "bezelInsertId",
+        "strapId",
+        "personalization",
+        "extra",
+      ]),
       partId: z.string().nullable(),
       name: z.string(),
       qty: z.number(),
@@ -198,6 +235,14 @@ const storedPartsSchema = z.object({
   strap: storedPartSchema("strap").optional(),
 }) satisfies z.ZodType<ResolvedSpec>;
 
+// The extras copied into an order, checked like its parts: only what identifies them.
+const storedExtrasSchema = z.object({
+  spareStrap: storedPartSchema("strap").optional(),
+  items: z.array(
+    z.looseObject({ id: z.string(), name: z.string() }).transform((extra) => extra as unknown as Extra),
+  ),
+}) satisfies z.ZodType<ResolvedExtras>;
+
 export const orderSchema = z.looseObject({
   id: z.string(),
   createdAt: z.iso.datetime(),
@@ -206,6 +251,7 @@ export const orderSchema = z.looseObject({
   notes: z.string(),
   spec: watchSpecSchema,
   parts: storedPartsSchema.optional(),
+  extras: storedExtrasSchema.optional(),
   quote: priceQuoteSchema,
   buildSheet: buildSheetSchema,
 }) satisfies z.ZodType<Order>;

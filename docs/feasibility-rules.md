@@ -36,6 +36,9 @@ ranked by similarity to the current choice (same style/colour/type first, then c
 | `dial-text` | error | Custom dial text on a non-printable dial; longer than 20 chars; characters outside letters, digits, space and `. , ' & -`; contains another watch brand's name; contains a protected geographic indication ("Swiss", "Swiss Made", "Genève/Geneva"). | Can't print it / trademark infringement / NH-movement watches don't qualify for Swiss indications. |
 | `dial-text` | warning | The text fits between the dial's hour markers only below 65 % of its full print size (the smallest legible size, a cap height of about 0.5 mm on a 28.5 mm dial). Measured with the preview's own layout (`src/domain/dialTextFit.ts`): markers, numerals and lume dots, minute track or chapter ring, 24h scale. On our dials that is about 14-19 characters. | It would print too small to read, or run into the markers. |
 | `caseback-engraving` | error | Engraving on a display (exhibition) caseback; longer than 60 chars; disallowed characters (same set as dial text); brand names or Swiss indications. | Can't laser-engrave glass on this setup / legal reasons. |
+| `spare-strap` | error | The spare strap (`extras.spareStrapId`) is an unknown id or not a strap; its width ≠ the case lug width; or it's a bracelet with fitted end links that doesn't list this case. | It wouldn't fit the watch it comes with. |
+| `spare-strap` | info | The spare strap is the same strap the watch is fitted with. | Two identical straps: a replacement, but no change of look. |
+| `extras` | error | An add-on id in `extras.itemIds` that isn't in the extras catalogue (`catalog/extras.ts`), or one listed more than once. | Nothing to supply / each add-on comes once per order. |
 | `lume-match` | info | Dial and hands both lumed but with different lume colours. | They glow differently in the dark. |
 | `crystal-material` | info | Mineral crystal on a case rated ≥ 200 m. | Sapphire is recommended for a tool/dive watch. |
 | `style-coherence` | info | Dial style differs from case style (e.g. dress dial in a dive case). | Taste only — allowed. |
@@ -64,3 +67,24 @@ every part for the other slots of the first remaining error, and every template'
 unlocked slots, repairing around each, and keeps the buildable result with the fewest changes plus
 warnings. The configurator uses it for "Fix everything" and "Keep the … fix the rest", and to find
 parts that "fit with changes".
+
+## Extras
+
+A spec's `extras` (a spare strap and add-ons such as a presentation box or fine regulation) are
+optional: an absent field means none, as on designs and orders from before extras existed. Their
+issues have `slots: []`, since extras aren't a slot, so they never show up in `evaluateOptions`.
+
+Fixes set the whole `extras` object. A `spare-strap` issue offers up to three other straps that fit,
+ranked by variety first (a different type from the main strap, since a spare is usually for a change
+of look), then similarity to the spare chosen (type, colour), then price and catalogue order, never
+the main strap itself; plus "Remove the spare strap". An `extras` issue offers removing the unknown
+or repeated add-ons.
+
+The extras follow the watch: a fix to the watch itself (a case with other lugs, say) is still
+offered when it leaves the spare strap not fitting, and the spare strap's own fix then sorts that
+out, which is what the repair loops above do next. `describeChanges` words extras changes as
+"Spare strap: none → Olive NATO 20mm", "Added: Presentation box" and "Removed: Gift wrapping and card".
+
+`evaluateSpareStraps(spec)` works like `evaluateOptions` for the spare strap: `NONE_OPTION_ID` first,
+then every strap in catalogue order, each with the `spare-strap` errors and warnings choosing it would
+cause. The identical-strap note is left out; compare the option with `spec.strapId` for that.
