@@ -17,6 +17,8 @@ const SERVER_ONLY = [
   "src/app/order-placed",
   "src/proxy.ts",
   "src/proxy.test.ts",
+  "src/server",
+  "src/components/orders/WorkshopSignIn.tsx",
 ];
 const NOT_COPIED = new Set(["node_modules", ".next", "out", ".git", "data", "e2e"]);
 

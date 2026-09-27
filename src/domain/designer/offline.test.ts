@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SPEC, resolveSpec, TEMPLATES } from "../catalog";
+import { CATALOG, DEFAULT_SPEC, resolveSpec, TEMPLATES } from "../catalog";
 import { validateSpec } from "../rules";
 import { watchSpecSchema } from "../schemas";
-import type { ChatTurn, DesignRequest, ResolvedSpec, WatchSpec } from "../types";
+import type { Catalog, ChatTurn, DesignRequest, ResolvedSpec, WatchSpec } from "../types";
 import { colorMatch, lightness } from "./colors";
 import { customerPriceEur, priceFloor } from "./floors";
 import { designOffline } from "./offline";
@@ -13,11 +13,11 @@ function templateSpec(id: string): WatchSpec {
   return template.spec;
 }
 
-function design(message: string, currentSpec?: WatchSpec, history?: ChatTurn[]) {
+function design(message: string, currentSpec?: WatchSpec, history?: ChatTurn[], catalog: Catalog = CATALOG) {
   const req: DesignRequest = { message, currentSpec, history };
-  const draft = designOffline(req, "no-key");
-  const parts: ResolvedSpec = resolveSpec(draft.spec);
-  return { ...draft, parts, report: validateSpec(draft.spec) };
+  const draft = designOffline(req, "no-key", catalog);
+  const parts: ResolvedSpec = resolveSpec(draft.spec, catalog);
+  return { ...draft, parts, report: validateSpec(draft.spec, catalog) };
 }
 
 const PROMPTS = [
@@ -48,14 +48,13 @@ describe("designOffline", () => {
     expect(parts.strap?.type).toBe("leather");
   });
 
-  it("engraves the wedding watch, moving to a solid caseback and explaining why", () => {
+  it("engraves the wedding watch on a dress case with a solid caseback", () => {
     const { parts, spec, reply } = design("elegant dress watch for my wedding, engrave 'A & M 2026' on the back");
     expect(spec.personalization.casebackEngraving).toBe("A & M 2026");
-    expect(parts.case?.caseback).toBe("solid");
+    expect(parts.case).toMatchObject({ style: "dress", caseback: "solid" });
     expect(parts.dial?.style).toBe("dress");
     expect(parts.hands?.style).toBe("dauphine");
     expect(parts.strap?.type).toBe("leather");
-    expect(reply).toContain("display caseback");
     expect(reply).toContain("'A & M 2026' will be laser-engraved");
   });
 
@@ -95,7 +94,11 @@ describe("designOffline", () => {
 
   it("says plainly when a request is impossible with these parts", () => {
     expect(design("I'd like a quartz chronograph").reply).toMatch(/automatic NH3x movement rather than quartz/);
-    expect(design("pilot watch with a salmon dial").reply).toMatch(/no salmon dial in the parts library/);
+    const salmonPilot = design("pilot watch with a salmon dial");
+    expect(salmonPilot.parts.dial?.name).toMatch(/Salmon/);
+    expect(salmonPilot.reply).toMatch(/Our pilot cases take 33\.5mm dials, and there's no salmon dial in that size, so I've put the /);
+    expect(salmonPilot.reply).not.toMatch(/couldn't also give it/);
+    expect(design("a field watch with a turquoise dial").reply).toMatch(/There's no turquoise dial as such; the closest is teal: the /);
   });
 
   it("keeps protected words off the dial and quotes the rule", () => {
@@ -128,13 +131,29 @@ describe("designOffline", () => {
   });
 
   it("doesn't claim a request already fits when the customer's own dial text is what blocks it", () => {
-    const olive = design("a 38mm green field watch on a leather strap").spec;
+    // A library where the only blue dials that fit the field case can't take printing.
+    const catalog = structuredClone(CATALOG);
+    const blue = (hex: string) => colorMatch(hex, "blue") >= 0.5;
+    catalog.dials = catalog.dials
+      .filter((dial) => !blue(dial.colorHex) || dial.diameterMm === 28.5)
+      .map((dial) => (blue(dial.colorHex) ? { ...dial, printable: false } : dial));
+    const olive = design("a 38mm green field watch on a leather strap", undefined, undefined, catalog).spec;
     const current = { ...olive, personalization: { ...olive.personalization, dialText: "Est. 2026" } };
-    const { spec, reply } = design("make it blue instead", current);
+    const { spec, reply } = design("make it blue instead", current, undefined, catalog);
     expect(spec.personalization.dialText).toBe("Est. 2026");
     expect(reply).not.toMatch(/already fits/);
     expect(reply).toMatch(/can't take custom printing/);
     expect(reply).toMatch(/I've kept the Field Olive dial\. Remove the dial text if you'd rather have that dial\./);
+  });
+
+  it("swaps in a dial that takes the customer's text without explaining dials they never asked about", () => {
+    const olive = design("a 38mm green field watch on a leather strap").spec;
+    const current = { ...olive, personalization: { ...olive.personalization, dialText: "Est. 2026" } };
+    const { spec, parts, reply } = design("make it blue instead", current);
+    expect(spec.personalization.dialText).toBe("Est. 2026");
+    expect(parts.dial).toMatchObject({ printable: true });
+    expect(colorMatch(parts.dial?.colorHex ?? "", "blue")).toBeGreaterThan(0.5);
+    expect(reply).toMatch(new RegExp(`^I've swapped in the ${parts.dial?.name} dial\\. I'm the workshop's quick designer`));
   });
 
   it("introduces itself to customers on the first message only, and never mentions API keys", () => {
@@ -307,10 +326,19 @@ describe("keeping follow-up edits small", () => {
     expect(design("make it bigger", FIELD).parts.case).toMatchObject({ style: "field", diameterMm: 39 });
   });
 
-  it("names the part that forced a new case", () => {
-    const { parts, reply } = design("Make the dial green and the strap brown", CLASSIC);
+  it("keeps the case when it takes the colour asked for", () => {
+    const { spec, parts, reply } = design("Make the dial green and the strap brown", CLASSIC);
+    expect(spec.caseId).toBe(CLASSIC.caseId);
     expect(colorMatch(parts.dial?.colorHex ?? "", "green")).toBeGreaterThan(0.6);
-    expect(reply).toMatch(/The Classic Diver 42 can't take a green dial, so I moved to the/);
+    expect(colorMatch(parts.strap?.colorHex ?? "", "brown")).toBeGreaterThan(0.6);
+    expect(reply).not.toMatch(/moved to/);
+  });
+
+  it("names the part that forced a new case", () => {
+    const { parts, reply } = design("Make the dial teal and the strap brown", CLASSIC);
+    expect(parts.case?.style).toBe("diver");
+    expect(colorMatch(parts.dial?.colorHex ?? "", "teal")).toBeGreaterThan(0.6);
+    expect(reply).toMatch(/The Classic Diver 42 can't take a teal dial, so I moved to the/);
   });
 });
 
@@ -360,15 +388,30 @@ describe("names, sizes and wording", () => {
   });
 
   it("describes sizes it can't match truthfully", () => {
-    const dress = design("a 36mm vintage dress watch").reply;
-    expect(dress).toContain("39mm");
-    expect(dress).not.toMatch(/so 38mm is as compact/);
+    const exact = design("a 36mm vintage dress watch");
+    expect(exact.parts.case).toMatchObject({ style: "dress", diameterMm: 36 });
+    expect(exact.reply).not.toMatch(/don't come in/);
+    const dress = design("a 37mm vintage dress watch").reply;
+    expect(dress).toMatch(/Our dress cases don't come in 37mm, so this is the .* at 36mm\./);
+    expect(dress).not.toMatch(/is as compact/);
     expect(design("a 38mm diver").reply).toMatch(/39mm/);
   });
 
-  it("uses the customer's colour word and keeps lume colours off the dial", () => {
-    expect(design("a pink dial", DEFAULT_SPEC).reply).toMatch(/no pink dial/);
+  it("uses the customer's colour word, says what the library calls it, and keeps lume colours off the dial", () => {
+    const pink = design("a pink dial", DEFAULT_SPEC);
+    expect(pink.reply).toMatch(/There's no pink dial as such; the closest is salmon: the /);
+    expect(colorMatch(pink.parts.dial?.colorHex ?? "", "salmon")).toBeGreaterThan(0.6);
     expect(design("a watch with lume that glows blue", DEFAULT_SPEC).spec.dialId).toBe(DEFAULT_SPEC.dialId);
+    // Navy is a shade of blue the library names: no such note.
+    expect(design("a navy dial", FIELD).reply).not.toMatch(/as such/);
+  });
+
+  it("follows a colour that only comes in another style's dials, pairing the dial with a case and hands of its style", () => {
+    const { parts, report } = design("a pink dial", DEFAULT_SPEC);
+    expect(parts.dial?.style).toBe("dress");
+    expect(parts.case?.style).toBe("dress");
+    expect(["dauphine", "baton", "cathedral"]).toContain(parts.hands?.style);
+    expect(report.issues.filter((issue) => issue.ruleId === "style-coherence")).toEqual([]);
   });
 
   it("explains a blocked dial once", () => {
@@ -393,9 +436,171 @@ describe("names, sizes and wording", () => {
   });
 });
 
+describe("extras", () => {
+  const BOX = "extra-presentation-box";
+  const POUCH = "extra-travel-pouch";
+  const TOOL = "extra-spring-bar-tool";
+  const GIFT = "extra-gift-wrap";
+  const REGULATION = "extra-fine-regulation";
+  const CERTIFICATE = "extra-timing-certificate";
+  const spareOf = (spec: WatchSpec) => CATALOG.straps.find((strap) => strap.id === spec.extras?.spareStrapId);
+  const spareIssues = (spec: WatchSpec) => validateSpec(spec).issues.filter((issue) => issue.ruleId === "spare-strap");
+
+  it("designs the wedding watch, engraved, gift-wrapped and boxed", () => {
+    const { spec, parts, report, reply } = design(
+      "an elegant dress watch for my wedding, engrave 'A & M 2026' on the back, gift wrapped with a box",
+    );
+    expect(report.buildable).toBe(true);
+    expect(parts.case).toMatchObject({ style: "dress", caseback: "solid" });
+    expect(spec.personalization.casebackEngraving).toBe("A & M 2026");
+    expect(spec.extras).toEqual({ spareStrapId: null, itemIds: [BOX, GIFT] });
+    expect(reply).toContain("I've added a presentation box and gift wrapping with a handwritten card.");
+    expect(reply).toContain("We'll confirm the card's message with you by email after you order.");
+    expect(reply).toContain("'A & M 2026' will be laser-engraved");
+  });
+
+  it("designs a field watch with a spare NATO that fits, on another kind of strap, and the strap tool", () => {
+    const { spec, parts, report, reply } = design("a field watch with a spare NATO strap and the strap tool");
+    expect(report.buildable).toBe(true);
+    expect(parts.case?.style).toBe("field");
+    const spare = spareOf(spec);
+    expect(spare).toMatchObject({ type: "nato", widthMm: parts.case?.lugWidthMm });
+    expect(parts.strap?.type).not.toBe("nato");
+    expect(spareIssues(spec)).toEqual([]);
+    expect(spec.extras?.itemIds).toEqual([TOOL]);
+    expect(reply).toContain(`I've added a spare ${spare?.name} strap and a spring-bar tool.`);
+  });
+
+  it("adds extras to the design on screen without touching the watch", () => {
+    const { spec, reply } = design("add a gift box", FIELD);
+    expect(spec).toEqual({ ...FIELD, extras: { spareStrapId: null, itemIds: [BOX] } });
+    expect(reply).toMatch(/^I've added a presentation box\./);
+    expect(reply).not.toMatch(/already/);
+    const regulated = design("make it as accurate as possible, with a timing certificate", FIELD);
+    expect(regulated.spec.extras?.itemIds).toEqual([REGULATION, CERTIFICATE]);
+    expect(regulated.reply).toMatch(/^I've added fine regulation \(aiming for within ±10 s\/day, face up\) and a timing certificate\./);
+  });
+
+  it("wraps a gift and boxes it, unless something already holds it", () => {
+    expect(design("it's a gift", FIELD).spec.extras?.itemIds).toEqual([BOX, GIFT]);
+    const pouched = { ...FIELD, extras: { spareStrapId: null, itemIds: [POUCH] } };
+    expect(design("it's a gift", pouched).spec.extras?.itemIds).toEqual([POUCH, GIFT]);
+    expect(design("it's a gift, no box", FIELD).spec.extras?.itemIds).toEqual([GIFT]);
+  });
+
+  it("takes extras out when asked", () => {
+    const current = { ...FIELD, extras: { spareStrapId: "strap-nato-olive-20", itemIds: [BOX, GIFT] } };
+    const noBox = design("no box", current);
+    expect(noBox.spec.extras).toEqual({ spareStrapId: "strap-nato-olive-20", itemIds: [GIFT] });
+    expect(noBox.reply).toMatch(/^I've taken out the presentation box\./);
+    const noSpare = design("remove the spare strap", current);
+    expect(noSpare.spec.extras).toEqual({ spareStrapId: null, itemIds: [BOX, GIFT] });
+    expect(noSpare.reply).toMatch(/^I've taken out the spare strap\./);
+  });
+
+  it("keeps the extras through unrelated changes, and moves the spare along with a new case", () => {
+    const current = { ...FIELD, extras: { spareStrapId: "strap-nato-olive-20", itemIds: [BOX, TOOL] } };
+    expect(design("make the strap brown leather", current).spec.extras).toEqual(current.extras);
+    expect(design("put 'For Anna' on the dial", current).spec.extras).toEqual(current.extras);
+
+    const diver = design("make it a 42mm diver", current);
+    expect(diver.report.buildable).toBe(true);
+    expect(diver.parts.case?.lugWidthMm).toBe(22);
+    const spare = spareOf(diver.spec);
+    expect(spare?.widthMm).toBe(22);
+    expect(spare?.type).not.toBe(diver.parts.strap?.type);
+    expect(diver.spec.extras?.itemIds).toEqual([BOX, TOOL]);
+    expect(diver.reply).toContain(`The spare is now the ${spare?.name} strap, to fit the new case's 22mm lugs.`);
+  });
+
+  it("honours the kind and colour asked for the spare, and says when it can't", () => {
+    const brown = spareOf(design("add a spare brown leather strap", FIELD).spec);
+    expect(brown?.type).toBe("leather");
+    expect(colorMatch(brown?.colorHex ?? "", "brown")).toBeGreaterThan(0.6);
+    // The titanium field watch is on the only 20mm NATO: a spare NATO is a second one.
+    const titanium = templateSpec("tpl-titanium-field");
+    const second = design("add a spare NATO", titanium);
+    expect(second.spec.extras?.spareStrapId).toBe(titanium.strapId);
+    expect(second.reply).toContain("The only NATO strap for these 20mm lugs is the one on the watch, so the spare is a second ");
+    expect(design("add a spare pink strap", FIELD).reply).toMatch(/There's no pink strap in 20mm for this case, so the spare is the /);
+  });
+
+  it("gives a spare of another kind by default, and swaps it when it becomes the watch's own strap", () => {
+    const spare = spareOf(design("a spare strap please", FIELD).spec);
+    expect(spare?.type).not.toBe("canvas");
+    const current = { ...FIELD, extras: { spareStrapId: "strap-leather-tan-20", itemIds: [] } };
+    const { spec, reply } = design("make the strap tan leather", current);
+    expect(spec.strapId).toBe("strap-leather-tan-20");
+    expect(spec.extras?.spareStrapId).not.toBe("strap-leather-tan-20");
+    expect(spareIssues(spec)).toEqual([]);
+    expect(reply).toMatch(/The spare is now the .*, so it isn't the same as the strap on the watch\./);
+  });
+
+  it("keeps a card's message off the watch and says it will be confirmed by email", () => {
+    const { spec, reply } = design("gift wrap it with a card saying 'Happy 40th Dad'", FIELD);
+    expect(spec.personalization).toEqual(FIELD.personalization);
+    expect(spec.extras?.itemIds).toContain(GIFT);
+    expect(reply).toContain("we'll confirm 'Happy 40th Dad' with you by email after you order");
+  });
+
+  it("counts a gift's extras towards a budget", () => {
+    const { spec, reply } = design("gift for my wife, she likes elegant things, budget €500");
+    expect(spec.extras?.itemIds).toEqual([BOX, GIFT]);
+    const price = customerPriceEur(spec);
+    expect(reply).toContain(`It comes to about €${price}`);
+  });
+});
+
+describe("picking parts nobody named", () => {
+  const NEUTRAL = ["black", "white", "silver", "cream", "grey"] as const;
+  const neutral = (hex: string) => NEUTRAL.some((color) => colorMatch(hex, color) >= 0.5);
+
+  it.each(["a 38mm diver", "a small watch for a slim wrist", "a pilot watch", "a field watch", "a dress watch"])(
+    "gives '%s' a neutral dial of the case's own style",
+    (message) => {
+      const { parts } = design(message);
+      expect(neutral(parts.dial?.colorHex ?? ""), parts.dial?.name).toBe(true);
+      expect(parts.dial?.style).toBe(parts.case?.style);
+    },
+  );
+
+  it("matches the hands' metal to the dial's print", () => {
+    const burgundy = design("a dress watch with a burgundy dial").parts;
+    expect(colorMatch(burgundy.dial?.printColorHex ?? "", "gold")).toBeGreaterThan(0.6);
+    expect(colorMatch(burgundy.hands?.colorHex ?? "", "gold")).toBeGreaterThan(0.6);
+    for (const message of ["a dress watch", "elegant dress watch for my wedding, engrave 'A & M 2026' on the back"]) {
+      const { parts } = design(message);
+      expect(colorMatch(parts.dial?.printColorHex ?? "", "gold"), message).toBeLessThan(0.5);
+      expect(colorMatch(parts.hands?.colorHex ?? "", "gold"), message).toBeLessThan(0.5);
+    }
+  });
+
+  it("chooses hands that suit the case", () => {
+    const suits: Record<string, string[]> = {
+      diver: ["mercedes", "sword", "snowflake"],
+      field: ["sword", "syringe", "cathedral"],
+      dress: ["dauphine", "baton", "cathedral"],
+      pilot: ["syringe", "sword", "arrow"],
+    };
+    for (const message of ["a 38mm diver", "a small watch for a slim wrist", "a pink dial", "a pilot watch"]) {
+      const { parts } = design(message, DEFAULT_SPEC);
+      expect(suits[parts.case?.style ?? ""], message).toContain(parts.hands?.style);
+    }
+  });
+});
+
 describe("every offline design", () => {
   const bases = [undefined, DEFAULT_SPEC, ...TEMPLATES.map((template) => template.spec)];
-  const messages = [...EXAMPLE_PROMPTS, ...PROMPTS, "make it smaller", "a pink dial", "remove the date", "call it 'Weekend Sea'"];
+  const messages = [
+    ...EXAMPLE_PROMPTS,
+    ...PROMPTS,
+    "make it smaller",
+    "a pink dial",
+    "remove the date",
+    "call it 'Weekend Sea'",
+    "it's a gift, with a spare strap and a travel pouch",
+    "a field watch with a spare NATO strap and the strap tool",
+  ];
 
   it("passes the API schemas, so it can be reloaded, shared and ordered", () => {
     for (const base of bases) {

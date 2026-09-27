@@ -1,8 +1,10 @@
 // The offline designer: turns a message into a buildable spec with keyword matching and catalogue
 // attributes, no AI involved. Used when no API key is configured and whenever the Claude designer
 // cannot answer. Deterministic: the same request always gives the same design and reply.
+import { FINE_REGULATION_TARGET_SEC_PER_DAY } from "../buildSheet";
 import { CATALOG, DEFAULT_SPEC, EXTRAS, findPart, partsForSlot, resolveSpec, specExtras, TEMPLATES } from "../catalog";
 import { evaluateOptions, repairSpec, validateSpec } from "../rules";
+import { DIAL_SEAT_TOLERANCE_MM } from "../rules/checks/dial";
 import { DESIGN_NAME_MAX_LENGTH } from "../schemas";
 import type {
   Catalog,
@@ -594,15 +596,22 @@ function dateNote(intent: DesignIntent, parts: ResolvedSpec): string | undefined
 }
 
 /**
- * Explains the most telling part the rules ruled out: one the customer's wishes pointed to, or the
- * current part when its own constraints (not the other new parts) rule it out.
+ * Explains the most telling part the rules ruled out: one the customer's wishes pointed to, unless
+ * the part chosen gives them what they asked for anyway, or the current part when its own
+ * constraints (not the other new parts) rule it out.
  */
-function tradeOffNote(choices: SlotChoice[], base: WatchSpec, asked: ReadonlySet<SlotKey>): { slot: SlotKey; note: string } | undefined {
+function tradeOffNote(
+  choices: SlotChoice[],
+  base: WatchSpec,
+  asked: ReadonlySet<SlotKey>,
+  satisfied: (slot: SlotKey) => boolean,
+): { slot: SlotKey; note: string } | undefined {
   for (const { slot, locked, chosen, ranked } of choices) {
     const [favourite] = ranked;
     if (locked || !favourite.blocker || !favourite.part || !chosen.part) continue;
     const ownConstraint = favourite.blocker.slots.every((s) => s === slot);
-    const wished = asked.has(slot) && favourite.partId !== base[slot] && favourite.score - chosen.score >= TRADE_OFF_MARGIN;
+    const wished =
+      asked.has(slot) && !satisfied(slot) && favourite.partId !== base[slot] && favourite.score - chosen.score >= TRADE_OFF_MARGIN;
     if (wished || ownConstraint) return { slot, note: blockedNote(favourite.blocker, chosen.part, chosen.partId === base[slot]) };
   }
   return undefined;
@@ -642,6 +651,53 @@ function colorNote(intent: DesignIntent, choices: SlotChoice[], base: WatchSpec,
   return keptCurrent
     ? `None of the ${word} dials fit this case, so I've kept the ${dial.name} dial.`
     : `None of the ${word} dials fit this case, so I went with the ${dial.name} dial.`;
+}
+
+/** The dial colour asked for, as opposed to gold details or a print colour. */
+function wantedDialColor(intent: DesignIntent): ColorName | undefined {
+  return intent.colors.dial.find((color) => color !== "gold" && !intent.dialPrint.includes(color));
+}
+
+/**
+ * A style asked for whose cases can't take any dial in the colour asked for: "a pilot watch with a
+ * salmon dial", when our pilot cases take a dial size no salmon dial comes in. Says so, rather than
+ * leaving the other case to look like a random choice.
+ */
+function styleColorNote(intent: DesignIntent, parts: ResolvedSpec, catalog: Catalog): string | undefined {
+  const { style } = intent;
+  const color = wantedDialColor(intent);
+  const { case: watchCase, dial } = parts;
+  if (!style || style === "gmt" || !color || !watchCase || !dial || watchCase.style === style || !hasColor(dial.colorHex, color)) {
+    return undefined;
+  }
+  const cases = catalog.cases.filter((c) => c.style === style);
+  if (cases.length === 0) return undefined;
+  const word = colorWord(intent, color);
+  const label = STYLE_LABELS[style];
+  const outcome = `so I've put the ${dial.name} dial in the ${watchCase.name} case.`;
+  const seats = [...new Set(cases.map((c) => c.dialDiameterMm))].sort((a, b) => a - b);
+  const sizeFits = catalog.dials.some(
+    (d) => hasColor(d.colorHex, color) && seats.some((seat) => Math.abs(d.diameterMm - seat) <= DIAL_SEAT_TOLERANCE_MM),
+  );
+  if (!sizeFits) {
+    const sizes = listJoin(seats.map((seat) => `${seat}mm`));
+    return `Our ${label} cases take ${sizes} dials, and there's no ${word} dial in ${seats.length > 1 ? "those sizes" : "that size"}, ${outcome}`;
+  }
+  return `None of the ${word} dials fits our ${label} cases, ${outcome}`;
+}
+
+/**
+ * The customer's colour word read as the closest colour the library has ("pink" as salmon), when no
+ * dial goes by that word: say so, so the dial doesn't look like a mistake.
+ */
+function closestColorNote(intent: DesignIntent, parts: ResolvedSpec, catalog: Catalog): string | undefined {
+  const color = wantedDialColor(intent);
+  const dial = parts.dial;
+  if (!color || !dial || !hasColor(dial.colorHex, color)) return undefined;
+  const word = colorWord(intent, color);
+  const named = (name: string, colorName: string) => new RegExp(`\\b${colorName}\\b`, "i").test(name);
+  if (word === color || !named(dial.name, color) || catalog.dials.some((d) => named(d.name, word))) return undefined;
+  return `There's no ${word} dial as such; the closest is ${color}: the ${dial.name} dial.`;
 }
 
 function strapNote(intent: DesignIntent, parts: ResolvedSpec): string | undefined {
@@ -777,7 +833,7 @@ interface Note {
 /** How the reply names an add-on it put in: "a presentation box", "fine regulation". */
 const ADDED_PHRASES: Record<string, string> = {
   [ADD_ON_IDS.giftWrap]: "gift wrapping with a handwritten card",
-  [ADD_ON_IDS.regulation]: "fine regulation (aiming for within ±10 s/day, face up)",
+  [ADD_ON_IDS.regulation]: `fine regulation (aiming for within ±${FINE_REGULATION_TARGET_SEC_PER_DAY} s/day, face up)`,
 };
 
 function extraName(id: string): string {
@@ -815,8 +871,9 @@ function extrasSentences(before: WatchSpec, after: WatchSpec, intent: DesignInte
   return sentences;
 }
 
-function strapKind(type: Strap["type"]): string {
-  return type === "nato" ? "NATO" : type;
+/** "NATO strap", "olive leather strap", "bracelet". */
+function spareKind(type: Strap["type"] | undefined, color?: string): string {
+  return strapWords(type, color).replace(/\bnato\b/, "NATO");
 }
 
 /** When the spare strap isn't the kind or colour asked for, say so instead of passing it off as one. */
@@ -827,25 +884,26 @@ function spareStrapNote(intent: DesignIntent, spec: WatchSpec, catalog: Catalog)
   if (!wish || !watchCase || !spare) return undefined;
   const lugs = `${watchCase.lugWidthMm}mm`;
   if (wish.type && spare.type !== wish.type) {
-    return `There's no ${strapWords(wish.type).replace("nato", "NATO")} for the ${lugs} lugs of this case, so the spare is the ${spareName(spare)} instead.`;
+    return `There's no ${spareKind(wish.type)} for the ${lugs} lugs of this case, so the spare is the ${spareName(spare)} instead.`;
   }
   if (wish.type && spare.id === main?.id) {
-    return `The only ${strapKind(wish.type)} ${wish.type === "bracelet" ? "" : "strap "}for these ${lugs} lugs is the one on the watch, so the spare is a second ${spare.name}.`;
+    return `The only ${spareKind(wish.type)} for these ${lugs} lugs is the one on the watch, so the spare is a second ${spare.name}.`;
   }
   const [color] = wish.colors;
   if (color && !hasColor(spare.colorHex, color)) {
-    const kind = strapWords(wish.type, wish.colorWords[0]).replace("nato", "NATO");
-    return `There's no ${kind} in ${lugs} for this case, so the spare is the ${spareName(spare)}.`;
+    return `There's no ${spareKind(wish.type, wish.colorWords[0])} in ${lugs} for this case, so the spare is the ${spareName(spare)}.`;
   }
   return undefined;
 }
 
 function composeReply(req: DesignRequest, base: WatchSpec, intent: DesignIntent, result: Design, fallback: FallbackReason, catalog: Catalog) {
   const parts = resolveSpec(result.spec, catalog);
-  const asked = new Set(wishes(intent, resolveSpec(base, catalog), catalog).flatMap(wishSlots));
+  const askedWishes = wishes(intent, resolveSpec(base, catalog), catalog);
+  const asked = new Set(askedWishes.flatMap(wishSlots));
   if (intent.dialText) asked.add("dialId");
   if (intent.casebackEngraving) asked.add("caseId");
-  const tradeOff = tradeOffNote(result.selection.choices, base, asked);
+  const satisfied = (slot: SlotKey) => askedWishes.filter((wish) => wishSlots(wish).includes(slot)).every((wish) => wish.met(parts));
+  const tradeOff = tradeOffNote(result.selection.choices, base, asked, satisfied);
   const candidates: Note[] = [
     { text: styleQuestion(intent, parts) },
     { text: brandNote(intent) },
@@ -858,6 +916,8 @@ function composeReply(req: DesignRequest, base: WatchSpec, intent: DesignIntent,
     ...textNotes(base.personalization, result.spec.personalization, result.rejectedTexts).map((text) => ({ text })),
     { text: budgetNote(intent, base, result, catalog), covers: ["style", "gmt"] },
     { text: dateNote(intent, parts), covers: ["date"] },
+    { text: styleColorNote(intent, parts, catalog), covers: ["style"] },
+    { text: closestColorNote(intent, parts, catalog) },
     { text: tradeOff?.note, covers: tradeOff?.slot === "dialId" ? ["dialColor"] : tradeOff?.slot === "strapId" ? ["strapType", "strapColor"] : [] },
     { text: tradeOff?.slot === "dialId" ? undefined : colorNote(intent, result.selection.choices, base, catalog), covers: ["dialColor"] },
     { text: tradeOff?.slot === "strapId" ? undefined : strapNote(intent, parts), covers: ["strapType", "strapColor"] },
@@ -877,7 +937,7 @@ function composeReply(req: DesignRequest, base: WatchSpec, intent: DesignIntent,
   // The introduction is for a first message, and the "didn't understand" answer already covers it.
   const firstTurn = (req.history?.length ?? 0) === 0;
   const introduce = fallback !== "no-key" || (firstTurn && intent.recognised);
-  return [lead, ...extras, ...notes, statusLine(result.spec, catalog), english, introduce ? FALLBACK_NOTES[fallback] : undefined]
+  return [lead, ...notes, ...extras, statusLine(result.spec, catalog), english, introduce ? FALLBACK_NOTES[fallback] : undefined]
     .filter(Boolean)
     .join(" ");
 }

@@ -1,13 +1,9 @@
 // The AI designer. Server-only: it may call the Claude API, and falls back to the offline designer
 // when no API key is configured. Either way, the rules engine has the final word on the result.
-import { DEFAULT_SPEC } from "../catalog";
-import { priceSpec } from "../pricing";
-import { normalizePersonalization, validateSpec } from "../rules";
-import { clampDesignName } from "../schemas";
 import type { DesignRequest, DesignResponse } from "../types";
 import { configuredModel, designWithClaude } from "./claude";
-import { describeSpecChanges } from "./diff";
 import { designOffline } from "./offline";
+import { normalizeRequest, toResponse } from "./respond";
 import type { DesignDraft } from "./types";
 
 export interface DesignerStatus {
@@ -49,27 +45,6 @@ async function draftDesign(req: DesignRequest, { signal, claude = true }: Design
 }
 
 export async function designWatch(request: DesignRequest, options: DesignOptions = {}): Promise<DesignResponse> {
-  // Texts in the design on screen arrive as typed (a share link, an old saved design): made plain
-  // first, so a designer never drops "For Dad – 1953" as unprintable when it means "For Dad - 1953".
-  const req: DesignRequest = request.currentSpec
-    ? {
-        ...request,
-        currentSpec: { ...request.currentSpec, personalization: normalizePersonalization(request.currentSpec.personalization) },
-      }
-    : request;
-  const draft = await draftDesign(req, options);
-  // Whatever the designer proposed must round-trip through the API schemas (reload, share, order),
-  // with its texts as the order store will keep them.
-  const spec = {
-    ...draft.spec,
-    name: clampDesignName(draft.spec.name),
-    personalization: normalizePersonalization(draft.spec.personalization),
-  };
-  return {
-    ...draft,
-    spec,
-    report: validateSpec(spec),
-    quote: priceSpec(spec),
-    changes: describeSpecChanges(req.currentSpec ?? DEFAULT_SPEC, spec),
-  };
+  const req = normalizeRequest(request);
+  return toResponse(req, await draftDesign(req, options));
 }

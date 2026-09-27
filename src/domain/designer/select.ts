@@ -81,6 +81,21 @@ const MIN_COLOR_CREDIT = 0.5;
  * spare NATO"): the NATO is meant to be the change of look.
  */
 const SPARE_TYPE_PENALTY = 3;
+/**
+ * With no dial colour asked for, a neutral dial for the style comes first; otherwise the cheapest
+ * dial (say, a safety-orange one) would win on cost alone.
+ */
+const NEUTRAL_DIAL_WEIGHT = 1.5;
+const NEUTRAL_DIAL_COLORS: Record<WatchStyle, ColorName[]> = {
+  diver: ["black"],
+  gmt: ["black"],
+  sport: ["black", "grey"],
+  pilot: ["black"],
+  field: ["cream", "black", "white"],
+  dress: ["silver", "white", "cream"],
+};
+/** For gold (gilt) hands on a dial with gold print, and against them on a dial without. */
+const GOLD_PRINT_HANDS_WEIGHT = 3;
 
 const RELATED_STYLES: Record<WatchStyle, WatchStyle[]> = {
   diver: ["gmt", "sport"],
@@ -121,9 +136,15 @@ const STRAP_TYPES_BY_WATCH_STYLE: Record<WatchStyle, Partial<Record<Strap["type"
 
 interface ScoringContext {
   intent: DesignIntent;
-  /** The style to design towards: what the customer asked for, else the current design's. */
+  /**
+   * The style to design towards: what the customer asked for, else the chosen case's (the case is
+   * chosen first), else the design's.
+   */
   style?: WatchStyle;
-  /** The current design's style: a follow-up edit stays in it unless the customer names another. */
+  /**
+   * The design's style: the current design's, so a follow-up edit stays in it unless the customer
+   * names another, or the style of the only dials that come in the colour asked for.
+   */
   baseStyle?: WatchStyle;
   /** The current design is a GMT and the customer didn't ask for another style: keep the GMT. */
   keepGmt: boolean;
@@ -224,6 +245,7 @@ function scoreMovement(movement: Movement, { intent, keepGmt, parts }: ScoringCo
 
 function scoreDial(dial: Dial, { intent, style, keepGmt }: ScoringContext): number {
   let score = 3 * styleAffinity(dial.style, style);
+  if (intent.colors.dial.length === 0 && style) score += NEUTRAL_DIAL_WEIGHT * bestMatch(dial.colorHex, NEUTRAL_DIAL_COLORS[style]);
   // A named colour outweighs style: "make the dial blue" on a field watch wants blue first. Gold,
   // and colours asked for on the numerals or details, may come from the print.
   intent.colors.dial.forEach((color, i) => {
@@ -245,12 +267,17 @@ function scoreDial(dial: Dial, { intent, style, keepGmt }: ScoringContext): numb
 }
 
 function scoreHands(hands: HandSet, { intent, style, parts }: ScoringContext): number {
-  const preferred = style ? HAND_STYLES_BY_WATCH_STYLE[style] : [];
+  // Hands suit the case they go in, whatever the customer called the watch.
+  const handStyle = parts.case?.style ?? style;
+  const preferred = handStyle ? HAND_STYLES_BY_WATCH_STYLE[handStyle] : [];
   const rank = preferred.indexOf(hands.style);
   let score = rank >= 0 ? 3 - rank : 0;
   if (parts.dial) {
     score += 2.5 * Math.abs(lightness(hands.colorHex) - lightness(parts.dial.colorHex));
     if (hands.lume === parts.dial.lume) score += 1.5;
+    // Gold hands go with gold print and indices, and look out of place against steel ones.
+    const goldPrint = colorCredit(parts.dial.printColorHex, "gold") > 0;
+    if (!wantsGold(intent)) score += (goldPrint ? 1 : -1) * GOLD_PRINT_HANDS_WEIGHT * colorCredit(hands.colorHex, "gold");
   }
   if (wantsGold(intent)) score += 4 * colorMatch(hands.colorHex, "gold");
   score += 4 * bestMatch(hands.colorHex, intent.colors.hands);
@@ -369,7 +396,7 @@ function bestCompatibleScore(slot: SlotKey, spec: WatchSpec, ctx: ScoringContext
 function caseLookahead(ctx: ScoringContext): (spec: WatchSpec) => number {
   return (spec) => {
     const parts = resolveSpec(spec, ctx.catalog);
-    const style = ctx.intent.style ?? ctx.baseStyle ?? parts.case?.style;
+    const style = ctx.intent.style ?? parts.case?.style ?? ctx.baseStyle;
     const lookaheadCtx = { ...ctx, style, parts, keepId: null, keepBonus: 0 };
     const { colors, ceramic, countdown } = ctx.intent;
     const insertWished = colors.bezel.length > 0 || ceramic || countdown;
@@ -379,6 +406,19 @@ function caseLookahead(ctx: ScoringContext): (spec: WatchSpec) => number {
       (insertWished ? INSERT_LOOKAHEAD_WEIGHT * bestCompatibleScore("bezelInsertId", spec, lookaheadCtx) : 0)
     );
   };
+}
+
+/**
+ * When no style is asked for and the dial colour asked for only comes in dials of another style than
+ * the design's, that style: a salmon dial is a dress dial, so it goes in a dress case, with dress hands.
+ */
+function colorStyle(intent: DesignIntent, designStyle: WatchStyle | undefined, catalog: Catalog): WatchStyle | undefined {
+  const [color] = intent.colors.dial.filter((wanted) => wanted !== "gold" && !intent.dialPrint.includes(wanted));
+  if (intent.style || !color) return undefined;
+  const dials = catalog.dials.filter((dial) => colorCredit(dial.colorHex, color) > 0);
+  if (dials.length === 0 || dials.some((dial) => dial.style === designStyle)) return undefined;
+  const best = dials.reduce((top, dial) => (colorCredit(dial.colorHex, color) > colorCredit(top.colorHex, color) ? dial : top));
+  return best.style;
 }
 
 export interface SelectionOptions {
@@ -403,7 +443,7 @@ export function selectParts(
   { locked, unwanted, lean = false }: SelectionOptions = {},
 ): Selection {
   const current = resolveSpec(base, catalog);
-  const baseStyle = current.case?.style;
+  const baseStyle = colorStyle(intent, current.case?.style, catalog) ?? current.case?.style;
   const keepGmt = Boolean(current.movement?.complications.includes("gmt")) && (!intent.style || intent.style === "gmt");
   let spec = start;
   const decided = new Set<SlotKey>();
@@ -412,7 +452,7 @@ export function selectParts(
     const parts = resolveSpec(spec, catalog);
     const ctx: ScoringContext = {
       intent,
-      style: intent.style ?? baseStyle ?? parts.case?.style,
+      style: intent.style ?? parts.case?.style ?? baseStyle,
       baseStyle,
       keepGmt,
       lean,

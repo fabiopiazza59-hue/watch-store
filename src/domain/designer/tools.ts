@@ -2,10 +2,10 @@
 // on any spec, and submit_design only accepts specs the rules call buildable.
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { CATALOG } from "../catalog";
+import { CATALOG, EXTRAS } from "../catalog";
 import { priceSpec } from "../pricing";
 import { normalizePersonalization, repairSpec, reviewText, validateSpec } from "../rules";
-import { DESIGN_NAME_MAX_LENGTH, watchSpecSchema } from "../schemas";
+import { DESIGN_NAME_MAX_LENGTH, MAX_EXTRA_ITEMS, watchSpecSchema } from "../schemas";
 import type { Catalog, Issue, WatchSpec } from "../types";
 import { MAX_REPLY_LENGTH } from "./prompt";
 
@@ -30,7 +30,11 @@ const submitDesignInputSchema = z.object({
   reply: z.string().trim().min(1).max(MAX_REPLY_LENGTH),
 });
 
-/** JSON schema for a full WatchSpec, with each slot limited to the catalogue's ids for that slot. */
+/**
+ * JSON schema for a full WatchSpec, with each slot limited to the catalogue's ids for that slot. The
+ * extras are required here, though optional in a spec, so the model always says what they are
+ * instead of dropping the customer's by leaving them out.
+ */
 function watchSpecJsonSchema(catalog: Catalog) {
   const ids = (key: keyof Catalog) => catalog[key].map((part) => part.id);
   const partId = (key: keyof Catalog, description: string) => ({ type: "string", enum: ids(key), description });
@@ -62,8 +66,29 @@ function watchSpecJsonSchema(catalog: Catalog) {
         required: ["dialText", "casebackEngraving"],
         additionalProperties: false,
       },
+      extras: {
+        type: "object",
+        description:
+          "What ships with the watch. Carry over the current design's extras unless the customer asks to change them; none is {\"spareStrapId\": null, \"itemIds\": []}.",
+        properties: {
+          spareStrapId: {
+            type: ["string", "null"],
+            enum: [...ids("straps"), null],
+            description: "A spare strap that fits the case's lugs, or null for none.",
+          },
+          itemIds: {
+            type: "array",
+            items: { type: "string", enum: EXTRAS.map((extra) => extra.id) },
+            uniqueItems: true,
+            maxItems: MAX_EXTRA_ITEMS,
+            description: "Add-on ids, each at most once.",
+          },
+        },
+        required: ["spareStrapId", "itemIds"],
+        additionalProperties: false,
+      },
     },
-    required: ["name", "movementId", "caseId", "dialId", "handsId", "crystalId", "bezelInsertId", "strapId", "personalization"],
+    required: ["name", "movementId", "caseId", "dialId", "handsId", "crystalId", "bezelInsertId", "strapId", "personalization", "extras"],
     additionalProperties: false,
   };
 }

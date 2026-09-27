@@ -168,3 +168,81 @@ describe("parseIntent", () => {
     expect(parseIntent("a steel bracelet").strapType).toBe("bracelet");
   });
 });
+
+describe("parseIntent: extras", () => {
+  const BOX = "extra-presentation-box";
+  const POUCH = "extra-travel-pouch";
+  const TOOL = "extra-spring-bar-tool";
+  const GIFT = "extra-gift-wrap";
+  const REGULATION = "extra-fine-regulation";
+  const CERTIFICATE = "extra-timing-certificate";
+  const extras = (message: string) => parseIntent(message).extras;
+
+  it.each<[string, string[]]>([
+    ["add a gift box", [BOX]],
+    ["put it in a presentation box", [BOX]],
+    ["and a travel pouch", [POUCH]],
+    ["the strap tool please", [TOOL]],
+    ["a spring-bar tool", [TOOL]],
+    ["gift wrapped with a box", [GIFT, BOX]],
+    ["make it as accurate as possible", [REGULATION]],
+    ["I'd like it regulated", [REGULATION]],
+    ["with a timing certificate", [CERTIFICATE]],
+  ])("reads '%s' as add-ons", (message, add) => {
+    expect(extras(message)).toMatchObject({ add, remove: [], gift: false });
+    expect(parseIntent(message).recognised).toBe(true);
+  });
+
+  it("reads 'it's a gift' as the occasion, not only a request for wrapping", () => {
+    expect(extras("it's a gift for my dad")).toMatchObject({ gift: true, add: [] });
+    expect(extras("a birthday present")).toMatchObject({ gift: true });
+    expect(extras("add a gift box")).toMatchObject({ gift: false, add: [BOX] });
+  });
+
+  it("reads removals, also along a list", () => {
+    expect(extras("no box")).toMatchObject({ add: [], remove: [BOX] });
+    expect(extras("remove the box and the pouch")).toMatchObject({ remove: [BOX, POUCH] });
+    expect(extras("I don't need gift wrapping")).toMatchObject({ remove: [GIFT] });
+    expect(extras("it's not a gift")).toMatchObject({ remove: [GIFT], gift: false });
+    expect(extras("without a box but with gift wrapping")).toMatchObject({ add: [GIFT], remove: [BOX] });
+    expect(extras("remove the spare strap")).toMatchObject({ removeSpareStrap: true, spareStrap: undefined });
+    expect(extras("no spare")).toMatchObject({ removeSpareStrap: true });
+  });
+
+  it.each(["a spare strap", "an extra strap", "a second strap", "two straps", "another band please"])(
+    "reads '%s' as a spare strap of any kind",
+    (message) => {
+      expect(extras(message).spareStrap).toEqual({ colors: [], colorWords: [] });
+    },
+  );
+
+  it("keeps a spare strap's kind and colour for the spare, not the watch's own strap", () => {
+    const nato = parseIntent("a field watch with a spare NATO strap and the strap tool");
+    expect(nato.extras).toMatchObject({ spareStrap: { type: "nato", colors: [] }, add: [TOOL] });
+    expect(nato.strapType).toBeUndefined();
+    expect(nato.style).toBe("field");
+
+    const olive = parseIntent("a black leather strap with a spare olive NATO");
+    expect(olive.extras.spareStrap).toEqual({ type: "nato", colors: ["green"], colorWords: ["olive"] });
+    expect(olive.strapType).toBe("leather");
+    expect(olive.colors.strap).toEqual(["black"]);
+    expect(parseIntent("a second strap in brown leather").extras.spareStrap).toMatchObject({ type: "leather", colors: ["brown"] });
+    expect(parseIntent("add a rubber one as a spare").extras.spareStrap).toMatchObject({ type: "rubber" });
+  });
+
+  it("doesn't read extras into words about the watch", () => {
+    for (const message of ["a GMT with a second time zone", "a second hand in red", "the spare strap in the box", "an extra strap tool"]) {
+      const { extras: wish } = parseIntent(message);
+      expect(wish.add.filter((id) => id === BOX), message).toEqual([]);
+      if (message !== "the spare strap in the box") expect(wish.spareStrap, message).toBeUndefined();
+    }
+    expect(parseIntent("a leather travel pouch")).toMatchObject({ style: undefined, strapType: undefined });
+    expect(parseIntent("travel GMT watch with a blue and red bezel").extras).toMatchObject({ add: [], gift: false });
+  });
+
+  it("keeps a card's message off the dial", () => {
+    const intent = parseIntent("gift wrap it with a card saying 'Happy 40th Dad'");
+    expect(intent).toMatchObject({ cardMessage: "Happy 40th Dad", dialText: undefined, casebackEngraving: undefined });
+    expect(intent.extras.add).toEqual([GIFT]);
+  });
+});

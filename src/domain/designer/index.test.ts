@@ -32,6 +32,20 @@ describe("describeSpecChanges", () => {
 
   it("is empty when nothing changed", () => {
     expect(describeSpecChanges(FIELD, { ...FIELD })).toEqual([]);
+    expect(describeSpecChanges(FIELD, { ...FIELD, extras: { spareStrapId: null, itemIds: [] } })).toEqual([]);
+  });
+
+  it("lists the extras after the watch", () => {
+    const after: WatchSpec = {
+      ...FIELD,
+      name: "Gift",
+      extras: { spareStrapId: "strap-nato-olive-20", itemIds: ["extra-gift-wrap"] },
+    };
+    expect(describeSpecChanges(FIELD, after)).toEqual([
+      "Name: 'Everyday Field' → 'Gift'",
+      "Spare strap: none → Olive NATO 20mm",
+      "Added: Gift wrapping and card",
+    ]);
   });
 });
 
@@ -46,6 +60,16 @@ describe("designWatch without an API key", () => {
     expect(response.report.buildable).toBe(true);
     expect(response.quote.suggestedRetailEur).toBeGreaterThan(0);
     expect(response.changes).toEqual(["Dial text: none → 'For Anna'"]);
+  });
+
+  it("lists the extras it added among the changes", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = await designWatch({ message: "add a gift box and a spare strap", currentSpec: FIELD });
+    expect(response.report.buildable).toBe(true);
+    expect(response.changes[0]).toMatch(/^Spare strap: none → /);
+    expect(response.changes.slice(1)).toEqual(["Added: Presentation box"]);
+    expect(response.quote.extrasCostEur).toBeGreaterThan(0);
   });
 
   it("never returns a design the API schemas would refuse on the next request", async () => {

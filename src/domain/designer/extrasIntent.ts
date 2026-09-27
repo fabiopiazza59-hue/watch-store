@@ -296,7 +296,7 @@ export function parseExtras(tokens: string[], strapTypeOf: (word: string) => Str
       (SPARE_CUES.has(tokens[i]) || PAIR_WORDS.has(tokens[i]) ? spareAt(tokens, i, strapTypeOf) : undefined) ??
       spareBefore(tokens, i, strapTypeOf);
     if (spare) {
-      // A span found looking back may start before tokens already read; only the rest is new.
+      // A span found looking back ("a rubber one as a spare") starts before this token: those words are about the spare too.
       const removal = mention(spare.start, spare.end);
       if (removal) {
         intent.removeSpareStrap = true;

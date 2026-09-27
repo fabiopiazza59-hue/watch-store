@@ -173,6 +173,13 @@ describe("/api/design", () => {
     expect(body.changes).toContain("Case: Classic Diver 42 → Field 38");
   });
 
+  it("adds extras and lists them among the changes", async () => {
+    const response = await postDesign(jsonRequest("POST", { message: "it's a gift", currentSpec: FIELD }));
+    const body = await response.json();
+    expect(body.spec.extras).toEqual({ spareStrapId: null, itemIds: ["extra-presentation-box", "extra-gift-wrap"] });
+    expect(body.changes).toEqual(["Added: Presentation box", "Added: Gift wrapping and card"]);
+  });
+
   it("rejects an empty message", async () => {
     const response = await postDesign(jsonRequest("POST", { message: "  " }));
     expect(response.status).toBe(400);

@@ -8,6 +8,12 @@ leather") into a concrete spec. A deterministic rules engine checks real part di
 whether the watch can actually be assembled. Buildable designs become orders with a step-by-step
 build sheet for the watchmaker (to start with, the founder, at the bench).
 
+**Live demo:** https://fabiopiazza59-hue.github.io/watch-store/, a static build on GitHub Pages
+(`npm run build:pages`, deployed by `.github/workflows/pages.yml` on every push). Everything that runs
+in the browser works there: the configurator, rules, prices, extras, share links and the quick
+designer. Ordering and the Claude designer need the server, so the demo shows the build sheet an
+order would get instead.
+
 ## Why it's built this way
 
 - **The AI suggests, the rules decide.** Whether a watch can be built is a question of geometry:

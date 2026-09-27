@@ -1,5 +1,6 @@
 // Browser-side calls to the app's API. Every failure becomes an ApiError whose message is safe to
 // show a customer; the API's `{ error, fields?, report? }` details travel with it.
+import { STATIC_DEMO } from "./site/deployment";
 import type {
   ChatTurn,
   Customer,
@@ -82,14 +83,20 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
 }
 
 export function fetchDesignerInfo(signal?: AbortSignal): Promise<DesignerInfo> {
+  if (STATIC_DEMO) return Promise.resolve({ mode: "offline", model: null });
   return request<DesignerInfo>("/api/design", { signal });
 }
 
-export function requestDesign(input: {
+export async function requestDesign(input: {
   message: string;
   currentSpec: WatchSpec;
   history: ChatTurn[];
 }): Promise<DesignResponse> {
+  if (STATIC_DEMO) {
+    // No server in the static demo: the offline designer runs here, loaded only when first asked.
+    const { designInBrowser } = await import("@/domain/designer/browser");
+    return designInBrowser(input);
+  }
   return request<DesignResponse>("/api/design", {
     method: "POST",
     body: JSON.stringify(input),

@@ -52,13 +52,13 @@ interface FixGroup {
 function allocate(groups: FixGroup[]): SuggestedFix[] {
   const taken = groups.map((group) => (group.shared ? 0 : group.fixes.length));
   let budget = Math.max(0, MAX_FIXES - taken.reduce((sum, n) => sum + n, 0));
-  const swapGroups = groups.flatMap((group, index) => (group.shared ? [index] : []));
-  swapGroups.forEach((index, preference) => {
+  const sharedGroups = groups.flatMap((group, index) => (group.shared ? [index] : []));
+  sharedGroups.forEach((index, preference) => {
     const share = Math.min(preference === 0 ? 2 : 1, groups[index].fixes.length, budget);
     taken[index] = share;
     budget -= share;
   });
-  for (const index of swapGroups) {
+  for (const index of sharedGroups) {
     const extra = Math.min(groups[index].fixes.length - taken[index], budget);
     taken[index] += extra;
     budget -= extra;

@@ -4,7 +4,7 @@
 // and an output-token budget, so neither latency nor spend can run away.
 import Anthropic from "@anthropic-ai/sdk";
 import { CATALOG, DEFAULT_SPEC } from "../catalog";
-import { repairSpec } from "../rules";
+import { repairSpec, validateSpec } from "../rules";
 import type { Catalog, DesignRequest, WatchSpec } from "../types";
 import { designOffline } from "./offline";
 import { MAX_REPLY_LENGTH, SYSTEM_PROMPT } from "./prompt";
@@ -136,13 +136,23 @@ function plainReply(text: string): string {
 }
 
 /**
+ * The model is asked to always state the extras. If it leaves them out anyway, the customer's extras
+ * on the current design stay, with the spare strap repaired if the new design's case doesn't take it.
+ */
+function keepCurrentExtras(spec: WatchSpec, current: WatchSpec, catalog: Catalog): WatchSpec {
+  if (spec.extras !== undefined || current.extras === undefined) return spec;
+  const merged = { ...spec, extras: current.extras };
+  return validateSpec(merged, catalog).buildable ? merged : repairSpec(merged, catalog).spec;
+}
+
+/**
  * The answer when the conversation ends without a submitted design (out of rounds, time or budget,
  * or a turn that can't be acted on): Claude's last proposal if it can be made buildable, otherwise
  * the offline designer's take on the message.
  */
 function fallbackDraft(req: DesignRequest, current: WatchSpec, proposal: WatchSpec, catalog: Catalog): DesignDraft {
   if (!sameSpec(proposal, current)) {
-    const repaired = repairSpec(proposal, catalog);
+    const repaired = repairSpec(keepCurrentExtras(proposal, current, catalog), catalog);
     if (repaired.report.buildable) {
       const reply =
         repaired.changes.length > 0
@@ -233,7 +243,9 @@ async function runDesignLoop(req: DesignRequest, client: MessagesClient, setting
     const results: BetaToolResultBlockParam[] = [];
     for (const block of toolUses) {
       const outcome = runDesignerTool(block, settings.catalog);
-      if (outcome.kind === "submitted") return { mode: "claude", spec: outcome.spec, reply: outcome.reply };
+      if (outcome.kind === "submitted") {
+        return { mode: "claude", spec: keepCurrentExtras(outcome.spec, current, settings.catalog), reply: outcome.reply };
+      }
       if (outcome.proposal) lastProposal = outcome.proposal;
       results.push(outcome.result);
     }
