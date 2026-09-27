@@ -219,6 +219,38 @@ export interface Personalization {
   casebackEngraving: string;
 }
 
+/**
+ * Something that ships with the watch but isn't part of it: packaging, a tool, a gift touch, or a
+ * bench service such as extra regulation. Listed in `catalog/extras.ts`.
+ */
+export interface Extra {
+  id: string;
+  name: string;
+  /** One line for the customer: what it is and why they might want it. */
+  description: string;
+  kind: "packaging" | "tool" | "gift" | "service";
+  /** Estimated unit cost to the workshop, EUR, excl. VAT (0 for pure bench services). */
+  costEur: number;
+  leadTimeDays: number;
+  supplierHint: string;
+  /** Extra bench time the workshop spends on it (regulation, wrapping). */
+  benchMinutes: number;
+}
+
+/** What the customer adds to the order on top of the watch itself. */
+export interface OrderExtras {
+  /** A second strap in the box, from the strap catalogue. Must fit the case's lug width. Null = none. */
+  spareStrapId: string | null;
+  /** Ids from `EXTRAS`, each at most once, in catalogue order. */
+  itemIds: string[];
+}
+
+/** Extras with ids resolved; unknown ids are dropped (the rules engine reports them). */
+export interface ResolvedExtras {
+  spareStrap?: Strap;
+  items: Extra[];
+}
+
 /** A complete watch configuration. References parts by id. */
 export interface WatchSpec {
   /** Optional nickname for the design ("Grandpa's field watch"). */
@@ -232,6 +264,8 @@ export interface WatchSpec {
   bezelInsertId: string | null;
   strapId: string;
   personalization: Personalization;
+  /** Spare strap and add-ons. Absent = none (designs, links and orders from before extras existed). */
+  extras?: OrderExtras;
 }
 
 /** Spec fields that hold part ids, in configurator order. */
@@ -315,7 +349,7 @@ export interface RepairResult {
 
 export interface PriceLine {
   label: string;
-  kind: "part" | "personalization" | "labour" | "qc" | "overhead";
+  kind: "part" | "personalization" | "extra" | "labour" | "qc" | "overhead";
   amountEur: number;
 }
 
@@ -324,6 +358,8 @@ export interface PriceQuote {
   lines: PriceLine[];
   partsCostEur: number;
   personalizationCostEur: number;
+  /** Spare strap and add-ons (their bench time is in `labourCostEur`). */
+  extrasCostEur: number;
   labourCostEur: number;
   overheadCostEur: number;
   totalCostEur: number;
@@ -350,7 +386,7 @@ export interface PriceQuote {
 // ---------------------------------------------------------------------------
 
 export interface BomLine {
-  slot: SlotKey | "personalization";
+  slot: SlotKey | "personalization" | "extra";
   partId: string | null;
   name: string;
   qty: number;
@@ -412,6 +448,8 @@ export interface Order {
    * what was ordered after the catalogue changes. Absent on orders placed before it was stored.
    */
   parts?: ResolvedSpec;
+  /** The extras as the catalogue described them at order time, like `parts`. Absent when none were stored. */
+  extras?: ResolvedExtras;
   quote: PriceQuote;
   buildSheet: BuildSheet;
 }

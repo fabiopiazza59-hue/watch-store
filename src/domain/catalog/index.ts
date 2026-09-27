@@ -1,6 +1,9 @@
 import type {
   Catalog,
+  Extra,
+  OrderExtras,
   Part,
+  ResolvedExtras,
   ResolvedSpec,
   SlotDef,
   SlotKey,
@@ -14,7 +17,10 @@ import { hands } from "./hands";
 import { movements } from "./movements";
 import { straps } from "./straps";
 
+import { EXTRAS } from "./extras";
+
 export { dateWheelColour, type DateWheelColour } from "./dateWheel";
+export { EXTRAS } from "./extras";
 export { TEMPLATES, type DesignTemplate } from "./templates";
 
 /** The parts library: every part the workshop can source, with real dimensions. */
@@ -94,4 +100,25 @@ export function resolveSpec(spec: WatchSpec, catalog: Catalog = CATALOG): Resolv
     bezelInsert: pick("bezelInserts", spec.bezelInsertId),
     strap: pick("straps", spec.strapId),
   } as ResolvedSpec;
+}
+
+/** Extras meaning "nothing added". */
+export const NO_EXTRAS: OrderExtras = { spareStrapId: null, itemIds: [] };
+
+/** The spec's extras, with an absent field read as none. */
+export function specExtras(spec: WatchSpec): OrderExtras {
+  return spec.extras ?? NO_EXTRAS;
+}
+
+/** Resolve a spec's extras. Unknown ids are dropped here; the rules engine reports them. */
+export function resolveExtras(
+  spec: WatchSpec,
+  catalog: Catalog = CATALOG,
+  extras: Extra[] = EXTRAS,
+): ResolvedExtras {
+  const { spareStrapId, itemIds } = specExtras(spec);
+  return {
+    spareStrap: spareStrapId ? catalog.straps.find((s) => s.id === spareStrapId) : undefined,
+    items: extras.filter((extra) => itemIds.includes(extra.id)),
+  };
 }

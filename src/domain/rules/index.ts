@@ -63,3 +63,14 @@ export function repairKeeping(spec: WatchSpec, lockedSlots: readonly SlotKey[], 
   const templates = catalog === CATALOG ? TEMPLATES : [];
   return repairKeepingParts(spec, lockedSlots, (candidate) => validateSpec(candidate, catalog), catalog, templates);
 }
+
+/**
+ * CONTRACT STUB (extras): for each strap in the catalogue, whether it can be the spare strap for
+ * `spec` (same `OptionStatus` shape as evaluateOptions; issues are the `spare-strap` errors/warnings
+ * choosing it would cause). The first option is NONE_OPTION_ID, meaning no spare strap.
+ */
+export function evaluateSpareStraps(spec: WatchSpec, catalog: Catalog = CATALOG): OptionStatus[] {
+  void spec;
+  void catalog;
+  throw new Error("evaluateSpareStraps: not implemented");
+}
